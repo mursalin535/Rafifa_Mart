@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Lora:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  /* Dark mode (default) */
+  --color-bg: #0A0A0A;
+  --color-surface: #13201A;
+  --color-divider: #1C4D3A;
+  --color-gold: #C9A864;
+  --color-heading: #F5F1E6;
+  --color-body: #EDE7DA;
+  --color-label: #EDE7DA;
+
+  /* Font families */
+  --font-heading: 'Cormorant Garamond', serif;
+  --font-body: 'Lora', serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+}
+
+body {
+  font-family: 'Lora', serif;
+  background-color: var(--color-bg);
+  color: var(--color-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Light mode */
+body.light {
+  --color-bg: #FAF7F0;
+  --color-surface: #F0EAD8;
+  --color-divider: #C9B99A;
+  --color-heading: #1A2620;
+  --color-body: #1A2620;
+  --color-label: #1A2620;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-divider); border-radius: 3px; }
+
+/* Brass Hairline */
+.brass-hairline {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-divider), transparent);
+}
