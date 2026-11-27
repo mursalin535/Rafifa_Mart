@@ -80,6 +80,13 @@ for (const dir of ['products', 'offers']) {
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Swagger UI (API documentation) — শুধু development-এ, production-এ বন্ধ
+if (!isProd) {
+    const swaggerUi = require('swagger-ui-express');
+    const openapiSpec = require('./openapi.json');
+    app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapiSpec));
+}
+
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(cookieParser());
