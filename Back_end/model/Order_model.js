@@ -114,6 +114,7 @@ class Order_model {
             `SELECT oi.*,
                     p.name AS item_name,
                     pv.volume_ml,
+                    pv.packaging_type,
                     pv.price AS variant_price
              FROM order_items oi
              LEFT JOIN product_variants pv ON oi.variant_id = pv.id

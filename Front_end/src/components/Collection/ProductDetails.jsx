@@ -1,12 +1,13 @@
+import { imageSrc } from '../../utils/imageUrl';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Get_customer } from '../Server/customer';
 import { Get_product_by_id, Get_variants } from '../Server/product';
 import { Get_product_images } from '../Server/product_image';
-import { Get_ratings } from '../Server/rating';
+import { Get_ratings, Add_rating } from '../Server/rating';
 import { Get_all_product_offers, Get_offers } from '../Server/offer';
+import { bestPrice, roundMoney, formatMoney } from '../../utils/pricing';
 
 const TAG_COLORS = {
   atar: '#C9A864',
@@ -31,8 +32,8 @@ export default function ProductDetails() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
 
-  const [reviewers, setReviewers] = useState({});
-  const [reviewersLoading, setReviewersLoading] = useState(true);
+  // reviewer-এর নাম/ছবি এখন ratings query থেকেই আসে (customer_name, customer_pic)
+  const reviewersLoading = false;
 
   const [quantities, setQuantities] = useState({});
 
@@ -40,6 +41,11 @@ export default function ProductDetails() {
   const [hoverRating, setHoverRating] = useState(0);
   const [newComment, setNewComment] = useState('');
   const [localExtraReviews, setLocalExtraReviews] = useState([]);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState(null); // { type: 'ok' | 'error', text }
+
+  // এই product-এর সব review, সরাসরি server থেকে (null = এখনো আসেনি)
+  const [liveRatings, setLiveRatings] = useState(null);
 
   const [selectedPackagingType, setSelectedPackagingType] = useState('atar');
 
@@ -69,7 +75,8 @@ export default function ProductDetails() {
 
   const product = products.find(p => p.id === productId);
   const product_images = productImages.filter(img => img.product_id === productId);
-  const product_ratings = ratings.filter(r => r.product_id === productId);
+  // server থেকে আনা review থাকলে সেটাই, না থাকলে (লোড হওয়া পর্যন্ত) আগের ডেটা
+  const product_ratings = liveRatings ?? [];
 
   const raw_product_variants = productVariants.filter(v => v.product_id === productId);
 
@@ -79,14 +86,42 @@ export default function ProductDetails() {
     .filter(v => v.packaging_type === selectedPackagingType)
     .sort((a, b) => a.volume_ml - b.volume_ml);
 
-  const linked_offer = productOffers.find(po => po.product_id === productId);
-  const active_offer = linked_offer ? offers.find(o => o.id === linked_offer.offer_id) : null;
+  // এই product-এর সব চালু offer (server-এর is_active দিয়ে); একাধিক হলে সবচেয়ে কম দাম নেওয়া হয়
+  const active_offers = productOffers
+    .filter(po => po.product_id === productId)
+    .map(po => offers.find(o => o.id === po.offer_id))
+    .filter(o => o && Number(o.is_active) === 1);
 
   const primary_image = product_images.find(img => img.is_primary) || product_images[0];
 
-  const avgRating = product_ratings.length > 0
-    ? product_ratings.reduce((sum, r) => sum + r.rating, 0) / product_ratings.length
+  // customer নতুন review দিলে সেটা দিয়ে তার আগের review বদলে যায় (একজনের একটাই review)
+  const allReviews = [
+    ...product_ratings.filter(r => !localExtraReviews.some(l => l.customer_id === r.customer_id)),
+    ...localExtraReviews,
+  ];
+
+  const avgRating = allReviews.length > 0
+    ? allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length
     : null;
+
+  // Collection থেকে আসা ডেটায় review নির্ভরযোগ্য না (সাধারণ customer সব review পায় না),
+  // তাই এই product-এর review সবসময় নিজে আনি
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLiveRatings() {
+      try {
+        const res = await Get_ratings(productId);
+        if (cancelled) return;
+        if (res?.success && Array.isArray(res.ratings)) {
+          setLiveRatings(res.ratings);
+        }
+      } catch (err) {
+        console.error('Failed to fetch reviews:', err);
+      }
+    }
+    fetchLiveRatings();
+    return () => { cancelled = true; };
+  }, [productId]);
 
   useEffect(() => {
     if (hasStateData || fetchedData) return;
@@ -107,7 +142,8 @@ export default function ProductDetails() {
         setFetchedData({
           products: productData,
           productImages: imagesRes?.data ?? (Array.isArray(imagesRes) ? imagesRes : []),
-          ratings: ratingsRes?.data ?? (Array.isArray(ratingsRes) ? ratingsRes : []),
+          // ratings API এর shape: { ratings, summary, success }
+          ratings: ratingsRes?.ratings ?? ratingsRes?.data ?? (Array.isArray(ratingsRes) ? ratingsRes : []),
           productVariants: variantsRes?.data ?? (Array.isArray(variantsRes) ? variantsRes : []),
           productOffers: productOffersRes?.data ?? (Array.isArray(productOffersRes) ? productOffersRes : []),
           offers: offersRes?.data ?? (Array.isArray(offersRes) ? offersRes : []),
@@ -121,35 +157,6 @@ export default function ProductDetails() {
     fetchProductData();
     return () => { cancelled = true; };
   }, [productId, hasStateData, fetchedData]);
-
-  useEffect(() => {
-    async function fetchReviewers() {
-      if (product_ratings.length === 0) {
-        setReviewersLoading(false);
-        return;
-      }
-      try {
-        const uniqueCustomerIds = [...new Set(product_ratings.map(r => r.customer_id))];
-        const results = await Promise.all(
-          uniqueCustomerIds.map(async (customerId) => {
-            const res = await Get_customer(customerId);
-            const customerData = Array.isArray(res) ? res[0] : res?.data ?? res;
-            return { customerId, customerData };
-          })
-        );
-        const reviewersMap = {};
-        results.forEach(({ customerId, customerData }) => {
-          reviewersMap[customerId] = customerData;
-        });
-        setReviewers(reviewersMap);
-      } catch (err) {
-        console.error('Failed to fetch reviewers:', err);
-      } finally {
-        setReviewersLoading(false);
-      }
-    }
-    fetchReviewers();
-  }, [productId, product_ratings]);
 
   if (fetching && !product) {
     return (
@@ -167,15 +174,12 @@ export default function ProductDetails() {
     );
   }
 
+  // server যে দাম চার্জ করবে হুবহু সেই দাম
   function getVariantPrice(variant) {
     if (!variant) return { price: null, original: null };
-    if (active_offer) {
-      const discounted = active_offer.discount_type === 'percentage'
-        ? Math.round(variant.price * (1 - active_offer.discount_value / 100))
-        : Math.max(0, Math.round(variant.price - active_offer.discount_value));
-      return { price: discounted, original: variant.price };
-    }
-    return { price: variant.price, original: null };
+    const base = roundMoney(variant.price);
+    const price = bestPrice(variant.price, active_offers);
+    return { price, original: price < base ? base : null };
   }
 
   function updateQuantity(variantId, delta) {
@@ -197,18 +201,18 @@ export default function ProductDetails() {
         volume_ml: v.volume_ml,
         quantity: qty,
         unit_price: price,
-        subtotal: price * qty,
+        subtotal: roundMoney(price * qty),
       };
     });
 
-  const variantsSubtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const variantsSubtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.subtotal, 0));
   const totalItems = orderItems.reduce((sum, item) => sum + item.quantity, 0);
 
   const atarCount = orderItems.filter(i => i.packaging_type === 'atar').reduce((s, i) => s + i.quantity, 0);
   const sprayCount = orderItems.filter(i => i.packaging_type === 'spray').reduce((s, i) => s + i.quantity, 0);
 
-  function handleSubmitReview() {
-    if (authLoading) return;
+  async function handleSubmitReview() {
+    if (authLoading || reviewSubmitting) return;
 
     if (!user) {
       navigate('/login', { state: { redirectTo: `/product-details/${productId}` } });
@@ -217,22 +221,44 @@ export default function ProductDetails() {
 
     if (newRating === 0) return;
 
-    const reviewInfo = {
-      product_id: productId,
-      customer_id: user.id,
-      rating: newRating,
-      comment: newComment,
-    };
+    setReviewSubmitting(true);
+    setReviewMessage(null);
 
-    console.log('New review:', reviewInfo);
+    try {
+      // customer_id server session থেকে নেয়, পাঠানো লাগে না
+      const res = await Add_rating({
+        product_id: productId,
+        rating: newRating,
+        comment: newComment.trim(),
+      });
 
-    setLocalExtraReviews(prev => [
-      ...prev,
-      { id: `local-${Date.now()}`, customer_id: user.id, rating: newRating, comment: newComment },
-    ]);
-    setReviewers(prev => ({ ...prev, [user.id]: user }));
-    setNewRating(0);
-    setNewComment('');
+      if (!res?.success) {
+        setReviewMessage({ type: 'error', text: res?.message || 'Could not submit your review. Please try again.' });
+        return;
+      }
+
+      const saved = res.data;
+      setLocalExtraReviews(prev => [
+        ...prev.filter(r => r.customer_id !== user.id),
+        {
+          id: saved?.id ?? `local-${Date.now()}`,
+          product_id: productId,
+          customer_id: user.id,
+          customer_name: user.name,
+          customer_pic: user.profile_pic,
+          rating: newRating,
+          comment: newComment.trim(),
+        },
+      ]);
+      setReviewMessage({ type: 'ok', text: res.message || 'Review saved.' });
+      setNewRating(0);
+      setNewComment('');
+    } catch (err) {
+      console.error('Failed to submit review:', err);
+      setReviewMessage({ type: 'error', text: 'Could not submit your review. Please try again.' });
+    } finally {
+      setReviewSubmitting(false);
+    }
   }
 
   function handleProceed() {
@@ -256,8 +282,10 @@ export default function ProductDetails() {
     });
   }
 
-  const allReviews = [...product_ratings, ...localExtraReviews];
-  const marqueeReviews = allReviews.length > 0 ? [...allReviews, ...allReviews] : [];
+  // review ৩টা বা বেশি হলে উপর-নিচে scroll করবে (লুপের জন্য তালিকা দুবার বসে),
+  // তার কম হলে স্থির তালিকা, কোনো কপি ছাড়া
+  const needsScroll = allReviews.length >= 3;
+  const marqueeReviews = needsScroll ? [...allReviews, ...allReviews] : allReviews;
 
   return (
     <>
@@ -339,14 +367,14 @@ export default function ProductDetails() {
             ) : allReviews.length === 0 ? (
               <span className="font-body text-[#F0EAD8]/30 text-xs">No reviews yet. Be the first!</span>
             ) : (
-              <div className="relative overflow-hidden h-[200px]">
+              <div className={needsScroll ? 'relative overflow-hidden h-[200px]' : 'relative'}>
                 <motion.div
-                  animate={{ y: ['0%', '-50%'] }}
-                  transition={{ duration: allReviews.length * 4, repeat: Infinity, ease: 'linear' }}
+                  animate={needsScroll ? { y: ['0%', '-50%'] } : { y: 0 }}
+                  transition={needsScroll ? { duration: allReviews.length * 4, repeat: Infinity, ease: 'linear' } : { duration: 0 }}
                   className="flex flex-col gap-3"
                 >
                   {marqueeReviews.map((rating, idx) => {
-                    const reviewer = reviewers[rating.customer_id];
+                    const reviewer = { name: rating.customer_name, profile_pic: rating.customer_pic };
                     return (
                       <div key={`${rating.id}-${idx}`} className="border-b border-[#F0EAD8]/5 pb-3">
                         <div className="flex items-center gap-2 mb-1">
@@ -406,11 +434,12 @@ export default function ProductDetails() {
                 onChange={(e) => setNewComment(e.target.value)}
                 placeholder="Share your thoughts on this fragrance..."
                 rows={3}
+                maxLength={1000}
                 className="w-full bg-[#0a0f0c]/60 border border-[#F0EAD8]/15 px-3 py-2 text-sm text-[#F0EAD8] font-body rounded-sm resize-none mb-3"
               />
               <button
                 onClick={handleSubmitReview}
-                disabled={newRating === 0}
+                disabled={newRating === 0 || reviewSubmitting}
                 className="w-full font-body text-xs uppercase tracking-widest py-2.5 rounded-sm disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 style={{
                   background: 'linear-gradient(90deg, #5C1A1A, #1C4D3A)',
@@ -418,8 +447,17 @@ export default function ProductDetails() {
                   border: '1px solid rgba(240,234,216,0.2)',
                 }}
               >
-                Submit Review
+                {reviewSubmitting ? 'Submitting...' : 'Submit Review'}
               </button>
+
+              {reviewMessage && (
+                <p
+                  className="font-body text-xs mt-3 text-center"
+                  style={{ color: reviewMessage.type === 'ok' ? '#5C8A6E' : '#e08a8a' }}
+                >
+                  {reviewMessage.text}
+                </p>
+              )}
             </div>
           </div>
         </motion.div>
@@ -445,7 +483,7 @@ export default function ProductDetails() {
                     <svg key={i} width="16" height="16" viewBox="0 0 24 24"
                       fill={i < Math.round(avgRating) ? '#C9A864' : 'none'}
                       stroke="#C9A864" strokeWidth="1">
-                      <polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 17.5 5.5 21.5 7 14.5 2 9.5 9 9" />
+                      <polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 17.5 5.5 21.5 7 14.5 2 9.5 9" />
                     </svg>
                   ))}
                   <span className="text-[#F0EAD8]/40 text-xs font-body ml-1">{avgRating.toFixed(1)}</span>
@@ -471,7 +509,7 @@ export default function ProductDetails() {
 
             <div className="absolute inset-[16px] rounded-full overflow-hidden bg-[#0d1410] flex items-center justify-center">
               {primary_image ? (
-                <img src={primary_image.image_url} alt={product.name} className="w-full h-full object-cover" />
+                <img src={imageSrc(primary_image.image_url)} alt={product.name} className="w-full h-full object-cover scale-[0.9]" style={{ boxShadow: '0 0 0 400px #0a0126' }} />
               ) : (
                 <span className="font-body text-[#F0EAD8]/20 text-xs">No image</span>
               )}
@@ -562,9 +600,9 @@ export default function ProductDetails() {
                       <div className="min-w-0">
                         <span className="block font-heading text-sm text-[#F0EAD8]">{variant.volume_ml}ml</span>
                         <div className="mt-0.5 flex items-baseline gap-2">
-                          <span className="text-sm font-body" style={{ color: getTagColor(selectedPackagingType) }}>৳{price}</span>
+                          <span className="text-sm font-body" style={{ color: getTagColor(selectedPackagingType) }}>৳{formatMoney(price)}</span>
                           {original != null && (
-                            <span className="text-xs font-body text-[#F0EAD8]/25 line-through">৳{original}</span>
+                            <span className="text-xs font-body text-[#F0EAD8]/25 line-through">৳{formatMoney(original)}</span>
                           )}
                         </div>
                       </div>
@@ -612,7 +650,7 @@ export default function ProductDetails() {
                 <span className="font-body text-[#F0EAD8]/70 text-xs uppercase tracking-[0.2em]">
                   Total ({totalItems} item{totalItems !== 1 ? 's' : ''})
                 </span>
-                <span className="font-heading text-[#C9A864] text-2xl">৳{variantsSubtotal}</span>
+                <span className="font-heading text-[#C9A864] text-2xl">৳{formatMoney(variantsSubtotal)}</span>
               </div>
             </div>
           )}

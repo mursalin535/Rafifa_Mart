@@ -23,6 +23,7 @@ import OurStory from './components/OurStory/OurStory'
 import BottlesPage from './components/Collection/BottlesPage'
 import BottleDetails from './components/Collection/BottleDetails'
 import Offers from './components/Offers/Offers'
+import Others from './components/Others/Others'
 import Admin from './components/Admin/Admin'
 
 
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
   { path: '/login', element: <Layout><Login /></Layout> },
   { path: '/signup', element: <Layout><Signup /></Layout> },
   { path: '/ourstory', element: <Layout><OurStory/></Layout> },
+  { path: '/others', element: <Layout><Others /></Layout> },
   { path: '/not-found', element: <Layout><NotFound /></Layout> },
   { path: '/admin/login', element: <Layout><AdminLogin /></Layout> },
   {

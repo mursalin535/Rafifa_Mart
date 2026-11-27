@@ -1,3 +1,4 @@
+import { imageSrc } from '../../utils/imageUrl';
 import { motion, AnimatePresence } from 'framer-motion'
 import { Get_products } from '../Server/product'
 import { Get_all_product_images } from '../Server/product_image'
@@ -57,9 +58,9 @@ function ProductThumb({ item, isActive, onClick, index }) {
         <div className="absolute inset-0 bg-[#13201A]" />
         {item.img ? (
           <img
-            src={item.img}
+            src={item.img} style={{ boxShadow: '0 0 0 100px #0a0126' }}
             alt={item.name}
-            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+            className={`absolute inset-0 w-full h-full object-cover scale-[0.9] transition-opacity duration-300 ${
               isActive ? 'opacity-90' : 'opacity-55 group-hover:opacity-75'
             }`}
             onError={(e) => { e.target.style.display = 'none' }}
@@ -137,7 +138,7 @@ export default function Collection_overview() {
 
         const enriched = productsList.map((p) => ({
           ...p,
-          img: imgMap[p.id]?.image_url || null,
+          img: imageSrc(imgMap[p.id]?.image_url) || null,
           categories: p.available_categories
             ? p.available_categories.split(', ').filter(Boolean)
             : [],

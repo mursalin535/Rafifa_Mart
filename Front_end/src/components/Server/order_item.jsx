@@ -1,21 +1,6 @@
 import rollbar from "../../rollbar";
 
-const BASE = "http://localhost:5007";
-
-export async function Add_order_item(data) {
-  try {
-    const res = await fetch(`${BASE}/add_order_item`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(data),
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
+const BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 export async function Get_order_items(orderId) {
   try {

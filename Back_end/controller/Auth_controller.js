@@ -8,17 +8,54 @@ const {
   createCustomerWithPassword,
 } = require('../model/Customer_model');
 
-// In-memory OTP store: key = email, value = { otp, name, password, phone, expiresAt }
+// In-memory OTP store:
+// key = email, value = { otp, name, email, passwordHash, phone, expiresAt, sentAt, attempts }
 const otpStore = new Map();
 
 const OTP_EXPIRY_MS = 60 * 1000; // 1 minute
+const RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds
+const MAX_OTP_ATTEMPTS = 5;
+const MAX_PENDING_OTPS = 5000;
+const MAX_PASSWORD_BYTES = 72; // bcrypt-এর limit
+const MAX_LOGIN_PASSWORD_BYTES = 1024;
+const PHONE_RE = /^01[3-9][0-9]{8}$/;
+
+// মেয়াদ শেষ হওয়া OTP প্রতি মিনিটে মুছে ফেলে
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of otpStore) {
+    if (now > record.expiresAt) otpStore.delete(key);
+  }
+}, 60 * 1000).unref();
+
+// ---------- helpers ----------
 
 function generateOtp() {
   return crypto.randomInt(100000, 999999).toString();
 }
 
+function isString(v) {
+  return typeof v === 'string';
+}
+
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function validatePassword(password) {
@@ -33,27 +70,76 @@ function validatePassword(password) {
   return { checks, allPassed };
 }
 
-// Step 1: User submits form → validate + check duplicate → send OTP
-async function SendOtp(req, res) {
-  try {
-    const { name, email, password, phone } = req.body;
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
+}
 
-    // Validate required fields
-    if (!name || !email || !password) {
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+// login-এর সময় নতুন session id (session fixation ঠেকাতে) + customerId সেট
+async function startCustomerSession(req, customerId) {
+  await regenerateSession(req);
+  req.session.customerId = customerId;
+  await saveSession(req);
+}
+
+function publicUser(customer) {
+  return {
+    id: customer.id,
+    name: customer.name,
+    email: customer.email,
+    phone: customer.phone,
+    profile_pic: customer.profile_pic,
+    created_at: customer.created_at,
+  };
+}
+
+// ---------- Step 1: form submit → validate + duplicate check → send OTP ----------
+
+async function SendOtp(req, res) {
+  let storeKey = null;
+  try {
+    const { name, email, password, phone } = req.body || {};
+
+    // সব required field string হতে হবে
+    if (!isString(name) || !isString(email) || !isString(password) || !name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
-
-    // Validate name
-    if (name.trim().length < 2) {
-      return res.status(400).json({ error: 'Name must be at least 2 characters.' });
+    if (phone !== undefined && phone !== null && !isString(phone)) {
+      return res.status(400).json({ error: 'Invalid phone number.' });
     }
 
-    // Validate email format
-    if (!isValidEmail(email)) {
+    // name
+    const cleanName = name.trim();
+    if (cleanName.length < 2 || cleanName.length > 100) {
+      return res.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
+    }
+
+    // email
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.length > 254 || !isValidEmail(cleanEmail)) {
       return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
 
-    // Validate password
+    // phone (optional): space/dash বাদ দিয়ে validate
+    let cleanPhone = null;
+    if (isString(phone) && phone.trim() !== '') {
+      cleanPhone = phone.replace(/[\s-]/g, '');
+      if (!PHONE_RE.test(cleanPhone)) {
+        return res.status(400).json({ error: 'Phone number must be 11 digits and start with 01 (e.g. 017XXXXXXXX).' });
+      }
+    }
+
+    // password
+    if (Buffer.byteLength(password) > MAX_PASSWORD_BYTES) {
+      return res.status(400).json({ error: 'Password is too long (max 72 characters).' });
+    }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
@@ -67,90 +153,105 @@ async function SendOtp(req, res) {
       return res.status(400).json({ error: `Password must include ${missing.join(', ')}.` });
     }
 
-    // Check if email already exists
-    const existing = await findCustomerByEmail(email);
+    // duplicate email
+    const existing = await findCustomerByEmail(cleanEmail);
     if (existing) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
 
-    // Generate OTP
-    const otp = generateOtp();
-    const expiresAt = Date.now() + OTP_EXPIRY_MS;
+    // resend cooldown + store cap
+    const previous = otpStore.get(cleanEmail);
+    if (previous && Date.now() - previous.sentAt < RESEND_COOLDOWN_MS) {
+      return res.status(429).json({ error: 'Please wait a few seconds before requesting another code.' });
+    }
+    if (!previous && otpStore.size >= MAX_PENDING_OTPS) {
+      return res.status(503).json({ error: 'Too many pending requests. Please try again later.' });
+    }
 
-    // Store OTP + user data in memory
-    otpStore.set(email.toLowerCase(), {
+    // plaintext password memory-তে রাখা হবে না, আগেই hash
+    const passwordHash = await bcrypt.hash(password, 10);
+    const otp = generateOtp();
+    const now = Date.now();
+
+    storeKey = cleanEmail;
+    otpStore.set(cleanEmail, {
       otp,
-      name: name.trim(),
-      email: email.toLowerCase(),
-      password,
-      phone: phone || null,
-      expiresAt,
+      name: cleanName,
+      email: cleanEmail,
+      passwordHash,
+      phone: cleanPhone,
+      expiresAt: now + OTP_EXPIRY_MS,
+      sentAt: now,
+      attempts: 0,
     });
 
-    // Send email
-    await sendOtpEmail({ to: email, name: name.trim(), otp });
+    // email-এর HTML-এ name escape করে পাঠানো হচ্ছে
+    await sendOtpEmail({ to: cleanEmail, name: escapeHtml(cleanName), otp });
 
     res.status(200).json({ success: true, message: 'Verification code sent to your email.' });
   } catch (err) {
+    // email পাঠাতে ব্যর্থ হলে record মুছে দিই
+    if (storeKey) otpStore.delete(storeKey);
     console.error('SendOtp error:', err);
     rollbar.error('SendOtp error:', err);
     res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
   }
 }
 
-// Step 2: User enters OTP → verify → create customer
+// ---------- Step 2: OTP verify → customer তৈরি → login ----------
+
 async function VerifyOtp(req, res) {
   try {
-    const { email, otp } = req.body;
+    const { email, otp } = req.body || {};
 
-    if (!email || !otp) {
+    if (!isString(email) || !isString(otp) || !email || !otp) {
       return res.status(400).json({ error: 'Email and verification code are required.' });
     }
 
-    const record = otpStore.get(email.toLowerCase());
+    const key = email.trim().toLowerCase();
+    const record = otpStore.get(key);
 
-    // Check if OTP exists
     if (!record) {
       return res.status(400).json({ error: 'No verification code found. Please request a new one.' });
     }
 
-    // Check if expired
     if (Date.now() > record.expiresAt) {
-      otpStore.delete(email.toLowerCase());
+      otpStore.delete(key);
       return res.status(400).json({ error: 'Verification code has expired. Please request a new one.' });
     }
 
-    // Check if OTP matches
-    if (record.otp !== otp.trim()) {
+    // OTP মিলছে কি না (timing-safe) + attempt limit
+    if (!safeEqual(record.otp, otp.trim())) {
+      record.attempts += 1;
+      if (record.attempts >= MAX_OTP_ATTEMPTS) {
+        otpStore.delete(key);
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
+      }
       return res.status(400).json({ error: 'Invalid verification code. Please try again.' });
     }
 
-    // OTP is valid — create the customer
-    const hashedPassword = await bcrypt.hash(record.password, 10);
-    const customer = await createCustomerWithPassword({
-      name: record.name,
-      email: record.email,
-      hashedPassword,
-      phone: record.phone,
-    });
+    // OTP ঠিক, customer তৈরি (password আগেই hash করা)
+    let customer;
+    try {
+      customer = await createCustomerWithPassword({
+        name: record.name,
+        email: record.email,
+        hashedPassword: record.passwordHash,
+        phone: record.phone,
+      });
+    } catch (dbErr) {
+      if (dbErr && dbErr.code === 'ER_DUP_ENTRY') {
+        otpStore.delete(key);
+        return res.status(409).json({ error: 'An account with this email already exists.' });
+      }
+      throw dbErr;
+    }
 
-    // Clean up OTP
-    otpStore.delete(email.toLowerCase());
+    otpStore.delete(key);
 
-    // Set session
-    req.session.customerId = customer.id;
+    await startCustomerSession(req, customer.id);
 
-    res.status(201).json({
-      success: true,
-      user: {
-        id: customer.id,
-        name: customer.name,
-        email: customer.email,
-        phone: customer.phone,
-        profile_pic: customer.profile_pic,
-        created_at: customer.created_at,
-      },
-    });
+    res.status(201).json({ success: true, user: publicUser(customer) });
   } catch (err) {
     console.error('VerifyOtp error:', err);
     rollbar.error('VerifyOtp error:', err);
@@ -158,46 +259,25 @@ async function VerifyOtp(req, res) {
   }
 }
 
-async function Signup(req, res) {
-  try {
-    const { name, email, password, phone } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email, and password are required.' });
-    }
-
-    const existing = await findCustomerByEmail(email);
-    if (existing) {
-      return res.status(409).json({ error: 'An account with this email already exists.' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const customer = await createCustomerWithPassword({ name, email, hashedPassword, phone });
-
-    req.session.customerId = customer.id;
-
-    res.status(201).json({
-      user: {
-        id: customer.id,
-        name: customer.name,
-        email: customer.email,
-        phone: customer.phone,
-        profile_pic: customer.profile_pic,
-        created_at: customer.created_at,
-      },
-    });
-  } catch (err) {
-    console.error('Signup error:', err);
-    rollbar.error('Signup error:', err);
-    res.status(500).json({ error: 'Something went wrong. Please try again.' });
-  }
-}
+// ---------- Login ----------
 
 async function Login(req, res) {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
-    const customer = await findCustomerByEmail(email);
+    if (!isString(email) || !isString(password) || !email || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+    if (Buffer.byteLength(password) > MAX_LOGIN_PASSWORD_BYTES) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.length > 254) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const customer = await findCustomerByEmail(cleanEmail);
 
     if (!customer || !customer.password) {
       return res.status(401).json({ error: 'Invalid email or password.' });
@@ -208,24 +288,22 @@ async function Login(req, res) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    req.session.customerId = customer.id;
+    // password ঠিক হওয়ার পরেই account status দেখি
+    if (customer.account_status !== 'active') {
+      return res.status(403).json({ error: 'This account is not active. Please contact support.' });
+    }
 
-    res.json({
-      user: {
-        id: customer.id,
-        name: customer.name,
-        email: customer.email,
-        phone: customer.phone,
-        profile_pic: customer.profile_pic,
-        created_at: customer.created_at,
-      },
-    });
+    await startCustomerSession(req, customer.id);
+
+    res.json({ user: publicUser(customer) });
   } catch (err) {
     console.error('Login error:', err);
     rollbar.error('Login error:', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 }
+
+// ---------- Logout ----------
 
 async function Logout(req, res) {
   req.session.destroy((err) => {
@@ -239,6 +317,8 @@ async function Logout(req, res) {
   });
 }
 
+// ---------- Current user ----------
+
 async function GetCurrentUser(req, res) {
   try {
     if (!req.session.customerId) {
@@ -247,20 +327,12 @@ async function GetCurrentUser(req, res) {
 
     const customer = await findCustomerById(req.session.customerId);
 
-    if (!customer) {
+    // customer নেই বা blocked হলে logged-out হিসেবে দেখাই
+    if (!customer || customer.account_status !== 'active') {
       return res.status(200).json({ user: null });
     }
 
-    res.json({
-      user: {
-        id: customer.id,
-        name: customer.name,
-        email: customer.email,
-        phone: customer.phone,
-        profile_pic: customer.profile_pic,
-        created_at: customer.created_at,
-      },
-    });
+    res.json({ user: publicUser(customer) });
   } catch (err) {
     console.error('GetCurrentUser error:', err);
     rollbar.error('GetCurrentUser error:', err);
@@ -268,4 +340,4 @@ async function GetCurrentUser(req, res) {
   }
 }
 
-module.exports = { SendOtp, VerifyOtp, Signup, Login, Logout, GetCurrentUser };
+module.exports = { SendOtp, VerifyOtp, Login, Logout, GetCurrentUser };

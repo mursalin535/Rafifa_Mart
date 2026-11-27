@@ -5,6 +5,70 @@ import { useAuth } from '../../context/AuthContext';
 import { Get_addresses, Add_address } from '../Server/address';
 import { Add_order } from '../Server/order';
 
+const volLabel = (item) =>
+  item.volume_ml
+    ? `${item.packaging_type === 'atar' ? 'Atar ' : item.packaging_type === 'spray' ? 'Spray ' : ''}${item.volume_ml}ml`
+    : ''; 
+
+// ঠিকানার ফর্ম: কোন ঘর compulsory আর ভুল হলে কী লেখা দেখাবে
+// (Area ঘরটা database-এর district column-এ যায়)
+const PHONE_RE = /^01[3-9][0-9]{8}$/;
+const POSTAL_RE = /^[0-9]{4}$/;
+
+const REQUIRED_FIELDS = {
+  label: 'House name',
+  recipient_name: 'Receiver name',
+  phone: 'Phone number',
+  address_line1: 'Address',
+  district: 'Area',
+  city: 'City',
+  division: 'Division',
+  postal_code: 'Postal code',
+};
+
+function validateAddress(addr) {
+  const errors = {};
+
+  for (const [key, label] of Object.entries(REQUIRED_FIELDS)) {
+    if (!String(addr[key] || '').trim()) {
+      errors[key] = `${label} is required.`;
+    }
+  }
+
+  if (!errors.phone) {
+    const cleanPhone = String(addr.phone).replace(/[\s-]/g, '');
+    if (!PHONE_RE.test(cleanPhone)) {
+      errors.phone = 'Phone number must be 11 digits and start with 01 (e.g. 017XXXXXXXX).';
+    }
+  }
+
+  if (!errors.postal_code && !POSTAL_RE.test(String(addr.postal_code).trim())) {
+    errors.postal_code = 'Postal code must be 4 digits.';
+  }
+
+  return errors;
+}
+
+// একটা input + তার নিচে নিজের error message
+function AddressInput({ name, placeholder, value, error, onChange, className = '' }) {
+  return (
+    <div className={`flex flex-col gap-1 ${className}`}>
+      <input
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(name, e.target.value)}
+        className="bg-[#0a0f0c] border px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-lg outline-none transition-colors"
+        style={{ borderColor: error ? '#e08a8a' : 'rgba(240,234,216,0.1)' }}
+        onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = 'rgba(201,168,100,0.5)'; }}
+        onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = 'rgba(240,234,216,0.1)'; }}
+      />
+      {error && (
+        <span className="font-body text-[11px]" style={{ color: '#e08a8a' }}>{error}</span>
+      )}
+    </div>
+  );
+}
+
 function VerticalOrnament({ flip = false }) {
   return (
     <motion.svg
@@ -91,17 +155,20 @@ export default function CheckOut() {
   const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [showNewAddressForm, setShowNewAddressForm] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
+  const [addressError, setAddressError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [placingOrder, setPlacingOrder] = useState(false);
   const [orderError, setOrderError] = useState(null);
+  // server দাম বদলেছে বললে নতুন total এখানে থাকে (null = এখনো আগের total)
+  const [confirmedTotal, setConfirmedTotal] = useState(null);
 
   const [newAddress, setNewAddress] = useState({
-    label: 'Home',
+    label: '',
     recipient_name: '',
     phone: '',
     address_line1: '',
-    address_line2: '',
-    city: '',
     district: '',
+    city: '',
     division: '',
     postal_code: '',
   });
@@ -120,7 +187,7 @@ export default function CheckOut() {
       }
       try {
         const res = await Get_addresses(user.id);
-        const addressList = Array.isArray(res) ? res : res?.data ?? [];
+        const addressList = (Array.isArray(res) ? res : res?.data ?? []).filter(a => a && a.id);
         setAddresses(addressList);
 
         const defaultAddr = addressList.find(a => a.is_default);
@@ -157,22 +224,49 @@ export default function CheckOut() {
     grand_total = 0,
   } = orderState;
 
+  const displayTotal = confirmedTotal ?? grand_total;
+  const priceChanged = confirmedTotal !== null;
+
   function handleNewAddressChange(field, value) {
     setNewAddress(prev => ({ ...prev, [field]: value }));
+    // ঘরে লেখা শুরু করলেই ওই ঘরের error মুছে যায়
+    setFieldErrors(prev => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   }
 
   async function handleSaveNewAddress() {
     if (!user) return;
+    setAddressError(null);
+
+    // সব compulsory ঘর আর phone/postal code ফর্মেই চেক (server-ও আবার যাচাই করে)
+    const errors = validateAddress(newAddress);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setAddressError('Please fix the highlighted fields.');
+      return;
+    }
+
     setSavingAddress(true);
     try {
-      const payload = { ...newAddress, customer_id: user.id };
-      const res = await Add_address(payload);
-      const savedAddress = res?.data ?? res;
-      setAddresses(prev => [...prev, savedAddress]);
-      setSelectedAddressId(savedAddress.id);
+      // customer_id server session থেকে নেয়, পাঠানো লাগে না
+      const res = await Add_address(newAddress);
+
+      if (!res?.success || !res?.data?.id) {
+        setAddressError(res?.message || 'Could not save the address. Please try again.');
+        return;
+      }
+
+      setAddresses(prev => [...prev, res.data]);
+      setSelectedAddressId(res.data.id);
       setShowNewAddressForm(false);
+      setFieldErrors({});
     } catch (err) {
       console.error('Failed to save address:', err);
+      setAddressError('Could not save the address. Please try again.');
     } finally {
       setSavingAddress(false);
     }
@@ -184,26 +278,28 @@ export default function CheckOut() {
     setOrderError(null);
 
     try {
-      // order_items থেকে perfume items বানানো — backend নিজে DB থেকে unit_price
-      // বের করে (Order_controller -> Product_model.Get_variant_by_id), তাই এখানে
-      // শুধু variant_id আর quantity পাঠালেই যথেষ্ট
+      // backend নিজে DB আর চালু offer থেকে দাম বের করে,
+      // এখানে শুধু variant_id, quantity আর কত total দেখেছি (expected_total) পাঠাই
       const perfumeItems = order_items.map(item => ({
         variant_id: item.variant_id,
         quantity: item.quantity,
       }));
 
       const payload = {
-        customer_id: user.id,
         address_id: selectedAddressId,
         payment_method: 'cod',
+        expected_total: Number(displayTotal),
         items: perfumeItems,
       };
 
       const res = await Add_order(payload);
 
       if (res?.success) {
-       alert('Order Placement Successfull');
+        alert('Order placed successfully!');
         navigate('/profile');
+      } else if (res?.code === 'PRICE_CHANGED') {
+        setConfirmedTotal(Number(res.current_total));
+        setOrderError(`${res.message} Press "Place Order" again to confirm the new total.`);
       } else {
         setOrderError(res?.message || 'Failed to place order. Please try again.');
       }
@@ -355,8 +451,8 @@ export default function CheckOut() {
                                     </span>
                                     <span className="font-body text-[#F0EAD8]/40 text-xs block mt-1 ml-4">
                                       {addr.address_line1}
-                                      {addr.address_line2 ? `, ${addr.address_line2}` : ''}, {addr.city}
-                                      {addr.district ? `, ${addr.district}` : ''}
+                                      {addr.district ? `, ${addr.district}` : ''}, {addr.city}
+                                      {addr.division ? `, ${addr.division}` : ''}
                                       {addr.postal_code ? ` — ${addr.postal_code}` : ''}
                                     </span>
                                   </div>
@@ -370,7 +466,7 @@ export default function CheckOut() {
                       {!showNewAddressForm ? (
                         <motion.button
                           whileHover={{ letterSpacing: '0.1em', borderColor: '#C9A864' }}
-                          onClick={() => setShowNewAddressForm(true)}
+                          onClick={() => { setAddressError(null); setFieldErrors({}); setShowNewAddressForm(true); }}
                           className="text-xs uppercase tracking-wider text-[#C9A864] border border-[#C9A864]/40 px-4 py-2.5 rounded-xl w-full"
                         >
                           + Add New Address
@@ -385,49 +481,30 @@ export default function CheckOut() {
                           <span className="text-xs uppercase tracking-[0.2em] text-[#C9A864] font-body mb-1 block">
                             New Address
                           </span>
-                          {[
-                            { key: 'label', placeholder: 'Label (Home, Office...)' },
-                            { key: 'recipient_name', placeholder: 'Recipient Name' },
-                            { key: 'phone', placeholder: 'Phone' },
-                            { key: 'address_line1', placeholder: 'Address Line 1' },
-                            { key: 'address_line2', placeholder: 'Address Line 2 (optional)' },
-                          ].map(({ key, placeholder }) => (
-                            <input
-                              key={key}
-                              placeholder={placeholder}
-                              value={newAddress[key]}
-                              onChange={(e) => handleNewAddressChange(key, e.target.value)}
-                              className="bg-[#0a0f0c] border border-[#F0EAD8]/10 px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-lg focus:border-[#C9A864]/50 outline-none transition-colors"
-                            />
-                          ))}
-                          <div className="flex gap-3">
-                            <input
-                              placeholder="City"
-                              value={newAddress.city}
-                              onChange={(e) => handleNewAddressChange('city', e.target.value)}
-                              className="flex-1 bg-[#0a0f0c] border border-[#F0EAD8]/10 px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-lg focus:border-[#C9A864]/50 outline-none transition-colors"
-                            />
-                            <input
-                              placeholder="Postal Code"
-                              value={newAddress.postal_code}
-                              onChange={(e) => handleNewAddressChange('postal_code', e.target.value)}
-                              className="flex-1 bg-[#0a0f0c] border border-[#F0EAD8]/10 px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-lg focus:border-[#C9A864]/50 outline-none transition-colors"
-                            />
+
+                          <AddressInput name="label" placeholder="House Name *" value={newAddress.label} error={fieldErrors.label} onChange={handleNewAddressChange} />
+                          <AddressInput name="recipient_name" placeholder="Receiver Name *" value={newAddress.recipient_name} error={fieldErrors.recipient_name} onChange={handleNewAddressChange} />
+                          <AddressInput name="phone" placeholder="Phone Number * (e.g. 017XXXXXXXX)" value={newAddress.phone} error={fieldErrors.phone} onChange={handleNewAddressChange} />
+                          <AddressInput name="address_line1" placeholder="Address *" value={newAddress.address_line1} error={fieldErrors.address_line1} onChange={handleNewAddressChange} />
+
+                          <div className="flex gap-3 items-start">
+                            <AddressInput className="flex-1" name="district" placeholder="Area *" value={newAddress.district} error={fieldErrors.district} onChange={handleNewAddressChange} />
+                            <AddressInput className="flex-1" name="city" placeholder="City *" value={newAddress.city} error={fieldErrors.city} onChange={handleNewAddressChange} />
                           </div>
-                          <div className="flex gap-3">
-                            <input
-                              placeholder="District"
-                              value={newAddress.district}
-                              onChange={(e) => handleNewAddressChange('district', e.target.value)}
-                              className="flex-1 bg-[#0a0f0c] border border-[#F0EAD8]/10 px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-lg focus:border-[#C9A864]/50 outline-none transition-colors"
-                            />
-                            <input
-                              placeholder="Division"
-                              value={newAddress.division}
-                              onChange={(e) => handleNewAddressChange('division', e.target.value)}
-                              className="flex-1 bg-[#0a0f0c] border border-[#F0EAD8]/10 px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-lg focus:border-[#C9A864]/50 outline-none transition-colors"
-                            />
+                          <div className="flex gap-3 items-start">
+                            <AddressInput className="flex-1" name="division" placeholder="Division *" value={newAddress.division} error={fieldErrors.division} onChange={handleNewAddressChange} />
+                            <AddressInput className="flex-1" name="postal_code" placeholder="Postal Code * (4 digits)" value={newAddress.postal_code} error={fieldErrors.postal_code} onChange={handleNewAddressChange} />
                           </div>
+
+                          {addressError && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -5 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="px-4 py-2.5 rounded-lg border border-[#5C1A1A]/60 bg-[#011863]/10"
+                            >
+                              <span className="font-body text-xs" style={{ color: '#e08a8a' }}>{addressError}</span>
+                            </motion.div>
+                          )}
 
                           <div className="flex gap-3 mt-2">
                             <motion.button
@@ -442,7 +519,7 @@ export default function CheckOut() {
                             </motion.button>
                             {addresses.length > 0 && (
                               <button
-                                onClick={() => setShowNewAddressForm(false)}
+                                onClick={() => { setAddressError(null); setFieldErrors({}); setShowNewAddressForm(false); }}
                                 className="px-4 text-xs uppercase tracking-wider text-[#F0EAD8]/40 border border-[#F0EAD8]/10 rounded-lg"
                               >
                                 Cancel
@@ -484,17 +561,21 @@ export default function CheckOut() {
                           className="flex items-center justify-between"
                         >
                           <span className="font-body text-[#F0EAD8]/60 text-sm">
-                            {item.volume_ml}ml × {item.quantity}
+                            {volLabel(item)} × {item.quantity}
                           </span>
-                          <span className="font-body text-[#F0EAD8]/80 text-sm">৳{item.subtotal}</span>
+                          {!priceChanged && (
+                            <span className="font-body text-[#F0EAD8]/80 text-sm">৳{item.subtotal}</span>
+                          )}
                         </motion.div>
                       ))}
                     </div>
 
-                    <div className="flex items-center justify-between pt-3 border-t border-[#F0EAD8]/5">
-                      <span className="font-body text-[#F0EAD8]/50 text-xs uppercase tracking-wider">Fragrance Subtotal</span>
-                      <span className="font-body text-[#F0EAD8] text-sm">৳{variants_subtotal}</span>
-                    </div>
+                    {!priceChanged && (
+                      <div className="flex items-center justify-between pt-3 border-t border-[#F0EAD8]/5">
+                        <span className="font-body text-[#F0EAD8]/50 text-xs uppercase tracking-wider">Fragrance Subtotal</span>
+                        <span className="font-body text-[#F0EAD8] text-sm">৳{variants_subtotal}</span>
+                      </div>
+                    )}
 
                     <motion.div
                       initial={{ opacity: 0, scale: 0.95 }}
@@ -503,8 +584,10 @@ export default function CheckOut() {
                       className="mt-5 rounded-xl px-4 py-4 flex items-center justify-between border border-[#C9A864]/20"
                       style={{ background: 'linear-gradient(90deg, rgba(92,26,26,0.15), rgba(201,168,100,0.12), rgba(28,77,58,0.15))' }}
                     >
-                      <span className="font-body text-[#F0EAD8]/70 text-xs uppercase tracking-[0.2em]">Grand Total</span>
-                      <span className="font-heading text-[#C9A864] text-2xl">৳{grand_total}</span>
+                      <span className="font-body text-[#F0EAD8]/70 text-xs uppercase tracking-[0.2em]">
+                        {priceChanged ? 'Updated Total' : 'Grand Total'}
+                      </span>
+                      <span className="font-heading text-[#C9A864] text-2xl">৳{displayTotal}</span>
                     </motion.div>
 
                     {orderError && (
@@ -538,12 +621,18 @@ export default function CheckOut() {
                           Placing Order...
                         </>
                       ) : (
-                        'Place Order & Pay with bKash'
+                        'Place Order · Cash on Delivery'
                       )}
                     </motion.button>
 
+                    {!selectedAddressId && !addressesLoading && (
+                      <p className="font-body text-[#e08a8a] text-[11px] mt-3 text-center">
+                        Please select or add a delivery address to place your order.
+                      </p>
+                    )}
+
                     <p className="font-body text-[#F0EAD8]/30 text-[11px] mt-3 text-center">
-                      You'll be redirected to bKash to complete your payment securely.
+                      Pay with cash when your order is delivered.
                     </p>
                   </div>
                 </div>

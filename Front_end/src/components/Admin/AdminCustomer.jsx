@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../../context/ThemeContext';
-import { Get_customers } from '../Server/customer';
-import { Search, Users, DollarSign, UserCheck, UserX, ShieldCheck, ShieldOff, Mail, Phone, Calendar, ShoppingBag } from 'lucide-react';
+import { Get_customers, Update_customer_status } from '../Server/customer';
+import { Search, Users, DollarSign, UserCheck, ShieldCheck, ShieldOff, Phone, Calendar, ShoppingBag, Ban } from 'lucide-react';
 
 export default function AdminCustomer() {
   const { dark } = useTheme();
@@ -10,6 +10,7 @@ export default function AdminCustomer() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState(null);
 
   useEffect(() => {
     fetchCustomers();
@@ -24,6 +25,31 @@ export default function AdminCustomer() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function toggleStatus(customer) {
+    const next = customer.account_status === 'active' ? 'blocked' : 'active';
+    const confirmText = next === 'blocked'
+      ? `Block ${customer.name}? They will be logged out and cannot place orders.`
+      : `Unblock ${customer.name}?`;
+    if (!window.confirm(confirmText)) return;
+
+    setStatusUpdatingId(customer.id);
+    try {
+      const res = await Update_customer_status(customer.id, next);
+      if (res?.success) {
+        setCustomers((prev) =>
+          prev.map((c) => (c.id === customer.id ? { ...c, account_status: next } : c))
+        );
+      } else {
+        alert(res?.message || 'Could not update the account status.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Could not update the account status.');
+    } finally {
+      setStatusUpdatingId(null);
     }
   }
 
@@ -145,7 +171,11 @@ export default function AdminCustomer() {
         className="mb-8 sm:mb-10"
       >
         <div className="relative max-w-md">
-       
+          <Search
+            size={16}
+            className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: mutedColor }}
+          />
           <input
             type="text"
             placeholder="Search by name, email or phone..."
@@ -195,6 +225,8 @@ export default function AdminCustomer() {
           <AnimatePresence mode="popLayout">
             {filtered.map((c, i) => {
               const isSelected = selected?.id === c.id;
+              const isActive = c.account_status === 'active';
+              const isUpdating = statusUpdatingId === c.id;
               return (
                 <motion.div
                   key={c.id}
@@ -266,8 +298,8 @@ export default function AdminCustomer() {
                       <span
                         className="px-3 py-1.5 font-body text-[11px] uppercase tracking-wider shrink-0"
                         style={{
-                          backgroundColor: c.account_status === 'active' ? 'rgba(76,175,125,0.12)' : 'rgba(181,80,79,0.12)',
-                          color: c.account_status === 'active' ? '#4CAF7D' : '#B5504F',
+                          backgroundColor: isActive ? 'rgba(76,175,125,0.12)' : 'rgba(181,80,79,0.12)',
+                          color: isActive ? '#4CAF7D' : '#B5504F',
                         }}
                       >
                         {c.account_status}
@@ -300,6 +332,27 @@ export default function AdminCustomer() {
                           {c.google_id ? 'Google Account' : 'Email / Password'}
                         </span>
                       </div>
+                    </div>
+
+                    {/* Block / Unblock */}
+                    <div className="px-5 sm:px-6 lg:px-8 pb-5 sm:pb-6">
+                      <button
+                        type="button"
+                        disabled={isUpdating}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStatus(c);
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 font-body text-[11px] uppercase tracking-wider transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{
+                          border: `1px solid ${isActive ? 'rgba(181,80,79,0.5)' : 'rgba(76,175,125,0.5)'}`,
+                          color: isActive ? '#B5504F' : '#4CAF7D',
+                          backgroundColor: isActive ? 'rgba(181,80,79,0.06)' : 'rgba(76,175,125,0.06)',
+                        }}
+                      >
+                        {isActive ? <Ban size={13} /> : <UserCheck size={13} />}
+                        {isUpdating ? 'Updating...' : isActive ? 'Block customer' : 'Unblock customer'}
+                      </button>
                     </div>
 
                     {/* Card Footer — Spending */}

@@ -11,16 +11,40 @@ const {
   createAdmin,
 } = require('../model/Admin_model');
 
-// In-memory OTP store for admin signup
+// In-memory OTP store for admin signup:
+// key = email, value = { otp, email, passwordHash, expiresAt, sentAt, attempts }
 const adminOtpStore = new Map();
+
 const OTP_EXPIRY_MS = 60 * 1000;
+const RESEND_COOLDOWN_MS = 30 * 1000;
+const MAX_OTP_ATTEMPTS = 5;
+const MAX_PENDING_OTPS = 200;
+const MAX_PASSWORD_BYTES = 72;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of adminOtpStore) {
+    if (now > record.expiresAt) adminOtpStore.delete(key);
+  }
+}, 60 * 1000).unref();
 
 function generateOtp() {
   return crypto.randomInt(100000, 999999).toString();
 }
 
+function isString(v) {
+  return typeof v === 'string';
+}
+
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function validatePassword(password) {
@@ -33,14 +57,29 @@ function validatePassword(password) {
   );
 }
 
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+}
+
 // POST /admin/login
 async function AdminLogin(req, res) {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password } = req.body || {};
+    if (!isString(email) || !isString(password) || !email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
-    const admin = await findAdminByEmail(email);
+    if (Buffer.byteLength(password) > 1024) {
+      return res.status(401).json({ error: 'Invalid admin credentials.' });
+    }
+    const admin = await findAdminByEmail(email.trim());
     if (!admin) {
       return res.status(401).json({ error: 'Invalid admin credentials.' });
     }
@@ -48,7 +87,12 @@ async function AdminLogin(req, res) {
     if (!match) {
       return res.status(401).json({ error: 'Invalid admin credentials.' });
     }
+
+    // login-এর সময় নতুন session id
+    await regenerateSession(req);
     req.session.adminId = admin.id;
+    await saveSession(req);
+
     res.json({ success: true, admin: { id: admin.id, email: admin.admin_email } });
   } catch (err) {
     console.error('AdminLogin error:', err);
@@ -103,16 +147,19 @@ async function GetAllAdmins(req, res) {
 // PUT /admin/change-password
 async function ChangeAdminPassword(req, res) {
   try {
-    const { oldPassword, newPassword } = req.body;
-    if (!oldPassword || !newPassword) {
+    const { oldPassword, newPassword } = req.body || {};
+    if (!isString(oldPassword) || !isString(newPassword) || !oldPassword || !newPassword) {
       return res.status(400).json({ error: 'Both old and new passwords are required.' });
+    }
+    if (Buffer.byteLength(newPassword) > MAX_PASSWORD_BYTES) {
+      return res.status(400).json({ error: 'New password is too long (max 72 characters).' });
     }
     if (!validatePassword(newPassword)) {
       return res.status(400).json({
         error: 'New password must include uppercase, lowercase, digit, and special character.',
       });
     }
-    const admin = await findAdminById(req.session.adminId);
+    const admin = await findAdminById(req.adminId);
     if (!admin) {
       return res.status(401).json({ error: 'Unauthorized.' });
     }
@@ -135,9 +182,24 @@ async function ChangeAdminPassword(req, res) {
 async function DeleteAdmin(req, res) {
   try {
     const targetId = Number(req.params.id);
-    if (req.session.adminId === targetId) {
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return res.status(400).json({ error: 'Invalid admin id.' });
+    }
+    if (req.adminId === targetId) {
       return res.status(400).json({ error: 'You cannot delete your own account.' });
     }
+
+    const target = await findAdminById(targetId);
+    if (!target) {
+      return res.status(404).json({ error: 'Admin not found.' });
+    }
+
+    // কেউ না থাকলে admin panel-এ কেউ ঢুকতে পারবে না
+    const admins = await findAllAdmins();
+    if (admins.length <= 1) {
+      return res.status(400).json({ error: 'You cannot delete the last admin account.' });
+    }
+
     await deleteAdminById(targetId);
     res.json({ success: true, message: 'Admin deleted.' });
   } catch (err) {
@@ -149,33 +211,55 @@ async function DeleteAdmin(req, res) {
 
 // POST /admin/send-otp — send OTP to add new admin
 async function AdminSendOtp(req, res) {
+  let storeKey = null;
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password } = req.body || {};
+    if (!isString(email) || !isString(password) || !email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
-    if (!isValidEmail(email)) {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!isValidEmail(cleanEmail) || cleanEmail.length > 254) {
       return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    if (Buffer.byteLength(password) > MAX_PASSWORD_BYTES) {
+      return res.status(400).json({ error: 'Password is too long (max 72 characters).' });
     }
     if (!validatePassword(password)) {
       return res.status(400).json({
         error: 'Password must include uppercase, lowercase, digit, and special character.',
       });
     }
-    const existing = await findAdminByEmail(email);
+    const existing = await findAdminByEmail(cleanEmail);
     if (existing) {
       return res.status(409).json({ error: 'An admin with this email already exists.' });
     }
+
+    const previous = adminOtpStore.get(cleanEmail);
+    if (previous && Date.now() - previous.sentAt < RESEND_COOLDOWN_MS) {
+      return res.status(429).json({ error: 'Please wait a few seconds before requesting another code.' });
+    }
+    if (!previous && adminOtpStore.size >= MAX_PENDING_OTPS) {
+      return res.status(503).json({ error: 'Too many pending requests. Please try again later.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
     const otp = generateOtp();
-    adminOtpStore.set(email.toLowerCase(), {
+    const now = Date.now();
+
+    storeKey = cleanEmail;
+    adminOtpStore.set(cleanEmail, {
       otp,
-      email: email.toLowerCase(),
-      password,
-      expiresAt: Date.now() + OTP_EXPIRY_MS,
+      email: cleanEmail,
+      passwordHash,
+      expiresAt: now + OTP_EXPIRY_MS,
+      sentAt: now,
+      attempts: 0,
     });
-    await sendOtpEmail({ to: email, name: 'Admin', otp });
+
+    await sendOtpEmail({ to: cleanEmail, name: 'Admin', otp });
     res.status(200).json({ success: true, message: 'Verification code sent.' });
   } catch (err) {
+    if (storeKey) adminOtpStore.delete(storeKey);
     console.error('AdminSendOtp error:', err);
     rollbar.error('AdminSendOtp error:', err);
     res.status(500).json({ error: 'Failed to send code.' });
@@ -185,24 +269,40 @@ async function AdminSendOtp(req, res) {
 // POST /admin/verify-otp — verify OTP and create admin
 async function AdminVerifyOtp(req, res) {
   try {
-    const { email, otp } = req.body;
-    if (!email || !otp) {
+    const { email, otp } = req.body || {};
+    if (!isString(email) || !isString(otp) || !email || !otp) {
       return res.status(400).json({ error: 'Email and code are required.' });
     }
-    const record = adminOtpStore.get(email.toLowerCase());
+    const key = email.trim().toLowerCase();
+    const record = adminOtpStore.get(key);
     if (!record) {
       return res.status(400).json({ error: 'No verification code found. Request a new one.' });
     }
     if (Date.now() > record.expiresAt) {
-      adminOtpStore.delete(email.toLowerCase());
+      adminOtpStore.delete(key);
       return res.status(400).json({ error: 'Code expired. Request a new one.' });
     }
-    if (record.otp !== otp.trim()) {
+    if (!safeEqual(record.otp, otp.trim())) {
+      record.attempts += 1;
+      if (record.attempts >= MAX_OTP_ATTEMPTS) {
+        adminOtpStore.delete(key);
+        return res.status(429).json({ error: 'Too many incorrect attempts. Request a new code.' });
+      }
       return res.status(400).json({ error: 'Invalid code. Try again.' });
     }
-    const hash = await bcrypt.hash(record.password, 10);
-    const admin = await createAdmin(record.email, hash);
-    adminOtpStore.delete(email.toLowerCase());
+
+    let admin;
+    try {
+      admin = await createAdmin(record.email, record.passwordHash);
+    } catch (dbErr) {
+      if (dbErr && dbErr.code === 'ER_DUP_ENTRY') {
+        adminOtpStore.delete(key);
+        return res.status(409).json({ error: 'An admin with this email already exists.' });
+      }
+      throw dbErr;
+    }
+
+    adminOtpStore.delete(key);
     res.status(201).json({ success: true, admin: { id: admin.id, email: admin.admin_email } });
   } catch (err) {
     console.error('AdminVerifyOtp error:', err);

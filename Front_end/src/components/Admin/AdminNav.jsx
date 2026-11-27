@@ -4,8 +4,9 @@ import { Gem, Users, Package, Shield, Wine, Tag } from 'lucide-react';
 
 const tabs = [
   { key: 'products', label: 'Products', icon: Gem },
-  { key: 'bottles', label: 'Bottles', icon: Wine },
   { key: 'offers', label: 'Offers', icon: Tag },
+  { key: 'bottles', label: 'Bottles', icon: Wine },
+  
   { key: 'customers', label: 'Customers', icon: Users },
   { key: 'orders', label: 'Orders', icon: Package },
   { key: 'admins', label: 'Admins', icon: Shield },
@@ -71,6 +72,7 @@ export default function AdminNav({ selectNavElement, horizontal = false }) {
       className="w-full flex flex-col gap-1 py-6 pr-4 lg:pr-6 sticky top-0 h-full"
       style={{ borderRight: '1px solid rgba(201,168,100,0.15)' }}
     >
+      <div className='w-full h-[15vh]'/>
       <p
         className="font-heading text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.25em] uppercase mb-4 pl-4"
         style={{ color: 'rgba(237,231,218,0.35)' }}

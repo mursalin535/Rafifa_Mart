@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../../context/ThemeContext';
 import { Shield, Plus, Trash2, KeyRound, X, Loader2, Repeat, Mail, Lock, ArrowLeft, CheckCircle2, AlertTriangle } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 const OTP_LENGTH = 6;
 const OTP_EXPIRY_SECONDS = 60;
 

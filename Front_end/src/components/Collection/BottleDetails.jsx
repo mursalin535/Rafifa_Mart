@@ -8,6 +8,66 @@ import { Add_bottle_order } from '../Server/order';
 const GOLD = '#C9A864';
 const CREAM = '#F0EAD8';
 
+// ঠিকানার ফর্ম: CheckOut আর Profile-এর সাথে একই নিয়ম
+// Area ঘরটা database-এর district column-এ যায়
+const PHONE_RE = /^01[3-9][0-9]{8}$/;
+const POSTAL_RE = /^[0-9]{4}$/;
+
+const REQUIRED_FIELDS = {
+    label: 'House name',
+    recipient_name: 'Receiver name',
+    phone: 'Phone number',
+    address_line1: 'Address',
+    district: 'Area',
+    city: 'City',
+    division: 'Division',
+    postal_code: 'Postal code',
+};
+
+function validateAddress(addr) {
+    const errors = {};
+
+    for (const [key, label] of Object.entries(REQUIRED_FIELDS)) {
+        if (!String(addr[key] || '').trim()) {
+            errors[key] = `${label} is required.`;
+        }
+    }
+
+    if (!errors.phone) {
+        const cleanPhone = String(addr.phone).replace(/[\s-]/g, '');
+        if (!PHONE_RE.test(cleanPhone)) {
+            errors.phone = 'Phone number must be 11 digits and start with 01 (e.g. 017XXXXXXXX).';
+        }
+    }
+
+    if (!errors.postal_code && !POSTAL_RE.test(String(addr.postal_code).trim())) {
+        errors.postal_code = 'Postal code must be 4 digits.';
+    }
+
+    return errors;
+}
+
+// একটা input + তার নিচে নিজের error message
+function AddressInput({ name, placeholder, value, error, onChange, className = '' }) {
+    return (
+        <div className={`flex flex-col gap-1 ${className}`}>
+            <input
+                type="text"
+                value={value}
+                onChange={(e) => onChange(name, e.target.value)}
+                placeholder={placeholder}
+                className="w-full bg-[#0a0f0c]/60 border px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-sm placeholder:text-[#F0EAD8]/20 focus:outline-none transition-colors"
+                style={{ borderColor: error ? '#e08a8a' : 'rgba(240,234,216,0.15)' }}
+                onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = 'rgba(201,168,100,0.4)'; }}
+                onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = 'rgba(240,234,216,0.15)'; }}
+            />
+            {error && (
+                <span className="font-body text-[11px]" style={{ color: '#e08a8a' }}>{error}</span>
+            )}
+        </div>
+    );
+}
+
 /* ═══════════ BOTTLE SVG ═══════════ */
 function BottleSVG({ className = '' }) {
     return (
@@ -18,6 +78,17 @@ function BottleSVG({ className = '' }) {
         </svg>
     );
 }
+
+const EMPTY_ADDR = {
+    label: '',
+    recipient_name: '',
+    phone: '',
+    address_line1: '',
+    district: '',
+    city: '',
+    division: '',
+    postal_code: '',
+};
 
 export default function BottleDetails() {
     const location = useLocation();
@@ -35,20 +106,12 @@ export default function BottleDetails() {
     const [selectedAddressId, setSelectedAddressId] = useState(null);
     const [showNewAddressForm, setShowNewAddressForm] = useState(false);
     const [savingAddress, setSavingAddress] = useState(false);
+    const [addressError, setAddressError] = useState(null);
+    const [fieldErrors, setFieldErrors] = useState({});
     const [placingOrder, setPlacingOrder] = useState(false);
     const [orderError, setOrderError] = useState(null);
 
-    const [newAddress, setNewAddress] = useState({
-        label: 'Home',
-        recipient_name: '',
-        phone: '',
-        address_line1: '',
-        address_line2: '',
-        city: '',
-        district: '',
-        division: '',
-        postal_code: '',
-    });
+    const [newAddress, setNewAddress] = useState(EMPTY_ADDR);
 
     useEffect(() => {
         if (!authLoading && !user) {
@@ -64,7 +127,7 @@ export default function BottleDetails() {
             }
             try {
                 const res = await Get_addresses(user.id);
-                const addressList = Array.isArray(res) ? res : res?.data ?? [];
+                const addressList = (Array.isArray(res) ? res : res?.data ?? []).filter(a => a && a.id);
                 setAddresses(addressList);
                 const defaultAddr = addressList.find(a => a.is_default);
                 if (defaultAddr) {
@@ -92,41 +155,70 @@ export default function BottleDetails() {
     }
 
     const unitPrice = Number(bottle.price_per_piece);
+    const stock = Math.max(0, Number(bottle.total_piece) || 0);
+    const maxQuantity = Math.min(stock, 100);
+    const outOfStock = stock === 0;
     const subtotal = unitPrice * quantity;
 
     function updateQuantity(delta) {
-        setQuantity(prev => Math.max(1, prev + delta));
+        // 1 এর নিচে আর stock (সর্বোচ্চ ১০০) এর উপরে যাবে না
+        setQuantity(prev => Math.min(Math.max(1, maxQuantity), Math.max(1, prev + delta)));
     }
 
     function handleNewAddressChange(field, value) {
         setNewAddress(prev => ({ ...prev, [field]: value }));
+        // ঘরে লেখা শুরু করলেই ওই ঘরের error মুছে যায়
+        setFieldErrors(prev => {
+            if (!prev[field]) return prev;
+            const next = { ...prev };
+            delete next[field];
+            return next;
+        });
     }
 
     async function handleSaveNewAddress() {
         if (!user) return;
+        setAddressError(null);
+
+        // সব compulsory ঘর আর phone/postal code ফর্মেই চেক (server-ও আবার যাচাই করে)
+        const errors = validateAddress(newAddress);
+        setFieldErrors(errors);
+        if (Object.keys(errors).length > 0) {
+            setAddressError('Please fix the highlighted fields.');
+            return;
+        }
+
         setSavingAddress(true);
         try {
-            const payload = { ...newAddress, customer_id: user.id };
-            const res = await Add_address(payload);
-            const savedAddress = res?.data ?? res;
-            setAddresses(prev => [...prev, savedAddress]);
-            setSelectedAddressId(savedAddress.id);
+            // customer_id server session থেকে নেয়, পাঠানো লাগে না
+            const res = await Add_address(newAddress);
+
+            if (!res?.success || !res?.data?.id) {
+                setAddressError(res?.message || 'Could not save the address. Please try again.');
+                return;
+            }
+
+            setAddresses(prev => [...prev, res.data]);
+            setSelectedAddressId(res.data.id);
+            setNewAddress(EMPTY_ADDR);
+            setFieldErrors({});
             setShowNewAddressForm(false);
         } catch (err) {
             console.error('Failed to save address:', err);
+            setAddressError('Could not save the address. Please try again.');
         } finally {
             setSavingAddress(false);
         }
     }
 
     async function handlePlaceOrder() {
-        if (!selectedAddressId) return;
+        if (!selectedAddressId || outOfStock) return;
         setPlacingOrder(true);
         setOrderError(null);
 
         try {
+            // customer_id server session থেকে নেয়, পাঠানো লাগে না
             const payload = {
-                customer_id: user.id,
                 address_id: selectedAddressId,
                 payment_method: 'cod',
                 items: [
@@ -223,8 +315,17 @@ export default function BottleDetails() {
                                                             </span>
                                                         )}
                                                     </div>
+                                                    {addr.recipient_name && (
+                                                        <span className="font-body text-[#F0EAD8]/60 text-xs">
+                                                            {addr.recipient_name}{addr.phone ? ` · ${addr.phone}` : ''}
+                                                        </span>
+                                                    )}
                                                     <span className="font-body text-[#F0EAD8]/40 text-xs leading-relaxed">
-                                                        {addr.address_line1}{addr.city ? `, ${addr.city}` : ''}{addr.district ? `, ${addr.district}` : ''}
+                                                        {addr.address_line1}
+                                                        {addr.district ? `, ${addr.district}` : ''}
+                                                        {addr.city ? `, ${addr.city}` : ''}
+                                                        {addr.division ? `, ${addr.division}` : ''}
+                                                        {addr.postal_code ? ` — ${addr.postal_code}` : ''}
                                                     </span>
                                                 </button>
                                             );
@@ -235,7 +336,7 @@ export default function BottleDetails() {
                                 {/* Add new address button */}
                                 {!showNewAddressForm && (
                                     <button
-                                        onClick={() => setShowNewAddressForm(true)}
+                                        onClick={() => { setAddressError(null); setFieldErrors({}); setShowNewAddressForm(true); }}
                                         className="w-full py-2.5 rounded-sm border border-dashed border-[#C9A864]/20 text-[#C9A864]/60 text-[11px] uppercase tracking-[0.15em] font-body hover:border-[#C9A864]/50 hover:text-[#C9A864] transition-all duration-300"
                                     >
                                         + Add New Address
@@ -245,52 +346,38 @@ export default function BottleDetails() {
                                 {/* New address form */}
                                 {showNewAddressForm && (
                                     <div className="flex flex-col gap-3">
-                                        <div className="flex gap-2">
-                                            {['Home', 'Work', 'Other'].map((lbl) => (
-                                                <button
-                                                    key={lbl}
-                                                    onClick={() => handleNewAddressChange('label', lbl)}
-                                                    className={`flex-1 py-2 rounded-sm text-[11px] uppercase tracking-wider font-body border transition-all duration-300 ${
-                                                        newAddress.label === lbl
-                                                            ? 'border-[#C9A864]/50 bg-[#C9A864]/10 text-[#C9A864]'
-                                                            : 'border-[#F0EAD8]/10 text-[#F0EAD8]/40 hover:border-[#F0EAD8]/20'
-                                                    }`}
-                                                >
-                                                    {lbl}
-                                                </button>
-                                            ))}
+                                        <AddressInput name="label" placeholder="House Name *" value={newAddress.label} error={fieldErrors.label} onChange={handleNewAddressChange} />
+                                        <AddressInput name="recipient_name" placeholder="Receiver Name *" value={newAddress.recipient_name} error={fieldErrors.recipient_name} onChange={handleNewAddressChange} />
+                                        <AddressInput name="phone" placeholder="Phone Number * (e.g. 017XXXXXXXX)" value={newAddress.phone} error={fieldErrors.phone} onChange={handleNewAddressChange} />
+                                        <AddressInput name="address_line1" placeholder="Address *" value={newAddress.address_line1} error={fieldErrors.address_line1} onChange={handleNewAddressChange} />
+
+                                        <div className="flex gap-3 items-start">
+                                            <AddressInput className="flex-1" name="district" placeholder="Area *" value={newAddress.district} error={fieldErrors.district} onChange={handleNewAddressChange} />
+                                            <AddressInput className="flex-1" name="city" placeholder="City *" value={newAddress.city} error={fieldErrors.city} onChange={handleNewAddressChange} />
+                                        </div>
+                                        <div className="flex gap-3 items-start">
+                                            <AddressInput className="flex-1" name="division" placeholder="Division *" value={newAddress.division} error={fieldErrors.division} onChange={handleNewAddressChange} />
+                                            <AddressInput className="flex-1" name="postal_code" placeholder="Postal Code * (4 digits)" value={newAddress.postal_code} error={fieldErrors.postal_code} onChange={handleNewAddressChange} />
                                         </div>
 
-                                        {[
-                                            { key: 'recipient_name', placeholder: 'Recipient Name' },
-                                            { key: 'phone', placeholder: 'Phone Number' },
-                                            { key: 'address_line1', placeholder: 'Address Line 1' },
-                                            { key: 'address_line2', placeholder: 'Address Line 2 (optional)' },
-                                            { key: 'city', placeholder: 'City' },
-                                            { key: 'district', placeholder: 'District' },
-                                            { key: 'division', placeholder: 'Division' },
-                                            { key: 'postal_code', placeholder: 'Postal Code' },
-                                        ].map(({ key, placeholder }) => (
-                                            <input
-                                                key={key}
-                                                type="text"
-                                                value={newAddress[key]}
-                                                onChange={(e) => handleNewAddressChange(key, e.target.value)}
-                                                placeholder={placeholder}
-                                                className="w-full bg-[#0a0f0c]/60 border border-[#F0EAD8]/15 px-3 py-2.5 text-sm text-[#F0EAD8] font-body rounded-sm placeholder:text-[#F0EAD8]/20 focus:outline-none focus:border-[#C9A864]/40 transition-colors"
-                                            />
-                                        ))}
+                                        {addressError && (
+                                            <div className="border border-red-500/30 bg-red-500/10 rounded-sm px-4 py-2.5">
+                                                <span className="font-body text-xs" style={{ color: '#e08a8a' }}>{addressError}</span>
+                                            </div>
+                                        )}
 
                                         <div className="flex gap-2 mt-1">
-                                            <button
-                                                onClick={() => setShowNewAddressForm(false)}
-                                                className="flex-1 py-2.5 rounded-sm border border-[#F0EAD8]/15 text-[#F0EAD8]/50 text-[11px] uppercase tracking-wider font-body hover:border-[#F0EAD8]/30 transition-colors"
-                                            >
-                                                Cancel
-                                            </button>
+                                            {addresses.length > 0 && (
+                                                <button
+                                                    onClick={() => { setAddressError(null); setFieldErrors({}); setShowNewAddressForm(false); }}
+                                                    className="flex-1 py-2.5 rounded-sm border border-[#F0EAD8]/15 text-[#F0EAD8]/50 text-[11px] uppercase tracking-wider font-body hover:border-[#F0EAD8]/30 transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={handleSaveNewAddress}
-                                                disabled={savingAddress || !newAddress.recipient_name || !newAddress.phone || !newAddress.address_line1 || !newAddress.city}
+                                                disabled={savingAddress}
                                                 className="flex-1 py-2.5 rounded-sm text-[11px] uppercase tracking-wider font-body text-[#0a0f0c] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                                                 style={{ background: `linear-gradient(90deg, ${GOLD}, ${CREAM}, ${GOLD})` }}
                                             >
@@ -381,8 +468,11 @@ export default function BottleDetails() {
                                     ৳{unitPrice}
                                 </span>
                             </div>
-                            <span className="font-body text-[#F0EAD8]/30 text-[11px] uppercase">
-                                {bottle.total_piece} pcs in stock
+                            <span
+                                className="font-body text-[11px] uppercase"
+                                style={{ color: outOfStock ? '#e08a8a' : 'rgba(240,234,216,0.3)' }}
+                            >
+                                {outOfStock ? 'Out of stock' : `${stock} pcs in stock`}
                             </span>
                         </div>
 
@@ -392,7 +482,7 @@ export default function BottleDetails() {
                             <div className="flex items-center gap-3">
                                 <button
                                     onClick={() => updateQuantity(-1)}
-                                    disabled={quantity <= 1}
+                                    disabled={quantity <= 1 || outOfStock}
                                     className="flex h-9 w-9 items-center justify-center rounded-full border border-[#F0EAD8]/15 text-[#F0EAD8]/60 transition-all duration-200 hover:border-[#C9A864] hover:text-[#C9A864] disabled:opacity-20 disabled:cursor-not-allowed"
                                 >
                                     −
@@ -400,7 +490,8 @@ export default function BottleDetails() {
                                 <span className="w-6 text-center font-body text-lg text-[#F0EAD8]">{quantity}</span>
                                 <button
                                     onClick={() => updateQuantity(1)}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#F0EAD8]/15 text-[#F0EAD8]/60 transition-all duration-200 hover:border-[#C9A864] hover:text-[#C9A864]"
+                                    disabled={quantity >= maxQuantity || outOfStock}
+                                    className="flex h-9 w-9 items-center justify-center rounded-full border border-[#F0EAD8]/15 text-[#F0EAD8]/60 transition-all duration-200 hover:border-[#C9A864] hover:text-[#C9A864] disabled:opacity-20 disabled:cursor-not-allowed"
                                 >
                                     +
                                 </button>
@@ -428,13 +519,13 @@ export default function BottleDetails() {
                     {/* Place Order button */}
                     <motion.button
                         onClick={handlePlaceOrder}
-                        disabled={!selectedAddressId || placingOrder}
+                        disabled={!selectedAddressId || placingOrder || outOfStock}
                         whileHover={{ letterSpacing: '0.15em', scale: 0.95 }}
                         transition={{ duration: 0.3 }}
                         className="mb-1 w-full shrink-0 rounded-[14px] py-4 text-sm font-heading uppercase tracking-[0.2em] text-[#0a0f0c] shadow-[0_0_20px_rgba(201,168,100,0.12)] disabled:cursor-not-allowed disabled:opacity-30"
                         style={{ background: 'linear-gradient(90deg, #C9A864, #F0EAD8, #C9A864)' }}
                     >
-                        {placingOrder ? 'Placing Order...' : 'Place Order'}
+                        {placingOrder ? 'Placing Order...' : outOfStock ? 'Out of Stock' : 'Place Order'}
                     </motion.button>
                 </motion.div>
 

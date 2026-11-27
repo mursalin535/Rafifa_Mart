@@ -7,6 +7,11 @@ import {
   ChevronDown, ChevronUp, Trash2, MapPin, CreditCard, ShoppingBag,
 } from 'lucide-react';
 
+const volLabel = (item) =>
+  item.volume_ml
+    ? `${item.packaging_type === 'atar' ? 'Atar ' : item.packaging_type === 'spray' ? 'Spray ' : ''}${item.volume_ml}ml`
+    : '';
+
 const STATUSES = ['pending', 'confirmed', 'shipped', 'delivered', 'rejected'];
 
 const STATUS_CONFIG = {
@@ -453,8 +458,8 @@ export default function AdminOrder() {
                                       <div key={idx} className="flex items-center justify-between">
                                         <div>
                                           <p className="font-body text-xs" style={{ color: dark ? 'rgba(237,231,218,0.7)' : 'rgba(26,38,32,0.7)' }}>
-                                            {item.item_name}
-                                            {item.volume_ml ? ` (${item.volume_ml}ml)` : ''}
+                                           {item.item_name}
+{volLabel(item) ? ` (${volLabel(item)})` : ''}
                                           </p>
                                           <p className="font-body text-[10px] mt-0.5" style={{ color: mutedColor }}>
                                             Perfume × {item.quantity}

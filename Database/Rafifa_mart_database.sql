@@ -1,226 +1,321 @@
-Create database rafifa_mart;
+-- MySQL dump 10.13  Distrib 8.0.44, for Win64 (x86_64)
+--
+-- Host: localhost    Database: rafifa_mart
+-- ------------------------------------------------------
+-- Server version	8.0.44
 
-use  rafifa_mart;
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
--- table craetion ---
+--
+-- Table structure for table `addresses`
+--
 
-CREATE TABLE customers (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(100) NOT NULL,
-  email VARCHAR(100) UNIQUE NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  phone VARCHAR(20),
-  address varchar(50),
-  account_status ENUM('active', 'blocked') DEFAULT 'active',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `addresses` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `customer_id` int NOT NULL,
+  `label` varchar(50) DEFAULT 'Home',
+  `recipient_name` varchar(255) NOT NULL,
+  `phone` varchar(20) NOT NULL,
+  `address_line1` varchar(255) NOT NULL,
+  `address_line2` varchar(255) DEFAULT NULL,
+  `city` varchar(100) NOT NULL,
+  `district` varchar(100) DEFAULT NULL,
+  `division` varchar(100) DEFAULT NULL,
+  `postal_code` varchar(20) DEFAULT NULL,
+  `country` varchar(100) NOT NULL DEFAULT 'Bangladesh',
+  `is_default` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_addresses_customer_id` (`customer_id`),
+  KEY `idx_addresses_customer_default` (`customer_id`,`is_default`),
+  KEY `idx_addresses_postal_code` (`postal_code`),
+  CONSTRAINT `fk_addresses_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE addresses (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  customer_id INT,
-  label VARCHAR(50),
-  recipient_name VARCHAR(255) NOT NULL,
-  phone VARCHAR(20) NOT NULL,
-  address_line1 VARCHAR(255) NOT NULL,
-  address_line2 VARCHAR(255),
-  city VARCHAR(100) NOT NULL,
-  district VARCHAR(100),
-  division VARCHAR(100),
-  postal_code VARCHAR(20),
-  country VARCHAR(100) NOT NULL DEFAULT 'Bangladesh',
-  is_default BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
-);
+--
+-- Table structure for table `admin_info`
+--
 
-CREATE TABLE products (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(150) NOT NULL,
-  description TEXT,
-  perfume_type VARCHAR(50),      -- 'floral','fresh','amber','woody','gourmand','citrusy'
-  perfume_for VARCHAR(20),       -- 'Male','Female'
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `admin_info` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `admin_email` varchar(100) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `admin_email` (`admin_email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE product_variants (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  product_id INT NOT NULL,
-  packaging_type ENUM('atar','spray') NOT NULL,
-  volume_ml INT NOT NULL,
-  price DECIMAL(10,2) NOT NULL,
-  stock INT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-  UNIQUE KEY uq_variant (product_id, packaging_type, volume_ml)
-);
+--
+-- Table structure for table `bottles`
+--
 
-CREATE TABLE product_images (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  product_id INT,
-  image_url VARCHAR(255),
-  is_primary BOOLEAN DEFAULT FALSE,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-);
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `bottles` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `photo_url` varchar(255) NOT NULL,
+  `total_piece` int DEFAULT '0',
+  `volume` enum('3ml','6ml','8ml','12ml') NOT NULL,
+  `price_per_piece` decimal(10,2) DEFAULT '0.00',
+  `description` text,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_bottles_created_at` (`created_at` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE bottles (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(100) NOT NULL,
-  photo_url VARCHAR(255) NOT NULL,
-  total_piece INT DEFAULT 0,
-  volume ENUM('3ml','6ml','8ml','12ml') NOT NULL,
-  price_per_piece DECIMAL(10,2) DEFAULT 0.00,
-  description TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+--
+-- Table structure for table `customers`
+--
 
-CREATE TABLE orders (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  customer_id INT,
-  address_id INT,
-  payment_method ENUM('cod', 'online') NOT NULL,
-  status ENUM('pending', 'confirmed', 'shipped', 'delivered', 'rejected') DEFAULT 'pending',
-  total_amount DECIMAL(10,2) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (customer_id) REFERENCES customers(id),
-  FOREIGN KEY (address_id) REFERENCES addresses(id)
-);
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `customers` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `email` varchar(100) NOT NULL,
+  `password` varchar(255) DEFAULT NULL,
+  `phone` varchar(20) DEFAULT NULL,
+  `account_status` enum('active','blocked') DEFAULT 'active',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `google_id` varchar(255) DEFAULT NULL,
+  `profile_pic` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`),
+  UNIQUE KEY `idx_customers_email` (`email`),
+  UNIQUE KEY `idx_customers_google_id` (`google_id`),
+  KEY `idx_customers_phone` (`phone`),
+  KEY `idx_customers_account_status` (`account_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE order_items (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  order_id INT,
-  variant_id INT,
-  quantity INT NOT NULL,
-  unit_price DECIMAL(10,2) NOT NULL,
-  item_type ENUM('perfume') DEFAULT 'perfume',
-  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-  FOREIGN KEY (variant_id) REFERENCES product_variants(id) ON DELETE SET NULL
-);
+--
+-- Table structure for table `offers`
+--
 
-CREATE TABLE order_bottles (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  order_id INT NOT NULL,
-  bottle_id INT NOT NULL,
-  quantity INT NOT NULL,
-  unit_price DECIMAL(10,2) NOT NULL,
-  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-  FOREIGN KEY (bottle_id) REFERENCES bottles(id) ON DELETE CASCADE
-);
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `offers` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `offer_name` varchar(100) DEFAULT NULL,
+  `title` varchar(150) DEFAULT NULL,
+  `punchline` varchar(255) DEFAULT NULL,
+  `thumbnail` varchar(255) DEFAULT NULL,
+  `discount_type` enum('flat','percentage') NOT NULL,
+  `discount_value` decimal(10,2) NOT NULL,
+  `valid_from` date DEFAULT NULL,
+  `valid_until` date DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_offers_valid_dates` (`valid_from`,`valid_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE ratings (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  product_id INT,
-  customer_id INT,
-  rating TINYINT CHECK (rating BETWEEN 1 AND 5),
-  comment TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-  FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-);
+--
+-- Table structure for table `order_bottles`
+--
 
-CREATE TABLE offers (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  offer_name VARCHAR(100),
-  title VARCHAR(150),
-  punchline VARCHAR(255),
-  thumbnail VARCHAR(255),
-  discount_type ENUM('flat', 'percentage') NOT NULL,
-  discount_value DECIMAL(10,2) NOT NULL,
-  valid_from DATE,
-  valid_until DATE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `order_bottles` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `order_id` int NOT NULL,
+  `bottle_id` int NOT NULL,
+  `quantity` int NOT NULL,
+  `unit_price` decimal(10,2) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `order_id` (`order_id`),
+  KEY `bottle_id` (`bottle_id`),
+  CONSTRAINT `order_bottles_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `order_bottles_ibfk_2` FOREIGN KEY (`bottle_id`) REFERENCES `bottles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE product_offers (
-  product_id INT,
-  offer_id INT,
-  PRIMARY KEY (product_id, offer_id),
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-  FOREIGN KEY (offer_id) REFERENCES offers(id) ON DELETE CASCADE
-);
+--
+-- Table structure for table `order_items`
+--
 
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `order_items` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `order_id` int DEFAULT NULL,
+  `quantity` int NOT NULL,
+  `unit_price` decimal(10,2) NOT NULL,
+  `item_type` enum('perfume') NOT NULL DEFAULT 'perfume',
+  `variant_id` int DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_order_items_order_id` (`order_id`),
+  KEY `fk_order_item_variant` (`variant_id`),
+  CONSTRAINT `fk_order_item_variant` FOREIGN KEY (`variant_id`) REFERENCES `product_variants` (`id`),
+  CONSTRAINT `order_items_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-CREATE TABLE sessions (
-  session_id VARCHAR(255) PRIMARY KEY,
-  customer_id INT,
-  data TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  expires_at TIMESTAMP,
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
-);
+--
+-- Table structure for table `orders`
+--
 
--- Dummy Data --
-SET SQL_SAFE_UPDATES = 0;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `orders` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `customer_id` int NOT NULL,
+  `address_id` int NOT NULL,
+  `payment_method` enum('cod','online') NOT NULL,
+  `status` enum('pending','confirmed','shipped','delivered','rejected') DEFAULT 'pending',
+  `total_amount` decimal(10,2) NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_orders_customer_id` (`customer_id`),
+  KEY `idx_orders_status` (`status`),
+  KEY `idx_orders_created_at` (`created_at` DESC),
+  KEY `idx_orders_customer_status` (`customer_id`,`status`),
+  KEY `idx_orders_address_id` (`address_id`),
+  CONSTRAINT `fk_orders_address` FOREIGN KEY (`address_id`) REFERENCES `addresses` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `orders_ibfk_1` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
+--
+-- Table structure for table `product_images`
+--
 
-INSERT INTO ratings (product_id, customer_id, rating, comment, created_at) VALUES
-(1, 1, 5, 'Amazing scent, lasts all day!', '2026-06-20 10:15:00'),
-(1, 2, 4, 'Really nice, but a bit strong at first.', '2026-06-21 14:30:00'),
-(2, 3, 5, 'My favorite cologne so far.', '2026-06-22 09:00:00'),
-(2, 4, 3, 'Good but fades quickly.', '2026-06-23 18:45:00'),
-(3, 5, 5, 'Smoky oud is exactly what I wanted.', '2026-06-24 11:20:00'),
-(3, 1, 4, 'Great for winter nights.', '2026-06-25 16:10:00'),
-(4, 2, 5, 'Delicate and elegant, love it!', '2026-06-26 08:30:00'),
-(4, 6, 4, 'Perfect for daily wear.', '2026-06-27 13:00:00'),
-(5, 7, 5, 'So fresh and citrusy, great for summer.', '2026-06-28 10:05:00'),
-(5, 3, 2, 'Too light for my taste.', '2026-06-29 19:20:00'),
-(6, 8, 4, 'Nice floral notes, subtle.', '2026-06-30 12:40:00'),
-(1, 8, 3, 'Decent, but overpriced.', '2026-07-01 09:15:00');
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `product_images` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `product_id` int DEFAULT NULL,
+  `image_url` varchar(255) DEFAULT NULL,
+  `is_primary` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_product_images_product_id` (`product_id`),
+  KEY `idx_product_images_is_primary` (`product_id`,`is_primary`),
+  CONSTRAINT `product_images_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
+--
+-- Table structure for table `product_offers`
+--
 
-INSERT INTO bottles (name, photo_url, total_piece, volume, price_per_piece, description, created_at, updated_at) VALUES
-('Classic Glass Bottle', 'https://example.com/images/bottles/classic-glass.jpg', 100, 50, 120.00, 'Elegant clear glass bottle with a screw cap, ideal for eau de parfum.', '2026-06-15 10:00:00', '2026-06-15 10:00:00'),
-('Frosted Amber Bottle', 'https://example.com/images/bottles/frosted-amber.jpg', 80, 100, 180.50, 'Frosted amber glass bottle that protects fragrance from light.', '2026-06-16 11:30:00', '2026-06-16 11:30:00'),
-('Travel Spray Bottle', 'https://example.com/images/bottles/travel-spray.jpg', 200, 15, 45.00, 'Compact atomizer bottle perfect for travel and on-the-go use.', '2026-06-17 09:15:00', '2026-06-17 09:15:00'),
-('Luxury Crystal Bottle', 'https://example.com/images/bottles/luxury-crystal.jpg', 30, 75, 350.00, 'Premium crystal-cut bottle designed for limited edition perfumes.', '2026-06-18 14:20:00', '2026-06-18 14:20:00'),
-('Matte Black Bottle', 'https://example.com/images/bottles/matte-black.jpg', 150, 50, 130.00, 'Sleek matte black bottle with a modern minimalist design.', '2026-06-19 16:00:00', '2026-06-19 16:00:00'),
-('Rose Gold Cap Bottle', 'https://example.com/images/bottles/rose-gold-cap.jpg', 90, 60, 160.00, 'Clear glass bottle featuring a rose gold cap for a feminine touch.', '2026-06-20 08:45:00', '2026-06-20 08:45:00'),
-('Refill Pouch Bottle', 'https://example.com/images/bottles/refill-pouch.jpg', 120, 200, 90.00, 'Eco-friendly refill pouch bottle for bulk fragrance storage.', '2026-06-21 12:10:00', '2026-06-21 12:10:00'),
-('Vintage Square Bottle', 'https://example.com/images/bottles/vintage-square.jpg', 60, 50, 140.00, 'Retro-inspired square bottle with textured glass finish.', '2026-06-22 15:30:00', '2026-06-22 15:30:00'),
-('Mini Sample Bottle', 'https://example.com/images/bottles/mini-sample.jpg', 300, 5, 15.00, 'Small sample-size bottle used for perfume testers.', '2026-06-23 10:50:00', '2026-06-23 10:50:00'),
-('Gift Set Bottle', 'https://example.com/images/bottles/gift-set.jpg', 50, 30, 100.00, 'Decorative bottle designed for holiday and gift set packaging.', '2026-06-24 17:00:00', '2026-06-24 17:00:00'),
-('Eco Recycled Glass Bottle', 'https://example.com/images/bottles/eco-recycled.jpg', 70, 100, 110.00, 'Made from recycled glass, sustainable and stylish.', '2026-06-25 09:40:00', '2026-06-25 09:40:00');
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `product_offers` (
+  `product_id` int NOT NULL,
+  `offer_id` int NOT NULL,
+  PRIMARY KEY (`product_id`,`offer_id`),
+  KEY `idx_product_offers_product_id` (`product_id`),
+  KEY `idx_product_offers_offer_id` (`offer_id`),
+  CONSTRAINT `product_offers_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`),
+  CONSTRAINT `product_offers_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
+--
+-- Table structure for table `product_variants`
+--
 
--- Changes --
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `product_variants` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `product_id` int NOT NULL,
+  `volume_ml` int NOT NULL,
+  `price` decimal(10,2) NOT NULL,
+  `stock` int NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `packaging_type` enum('atar','spray') NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_variant` (`product_id`,`packaging_type`,`volume_ml`),
+  CONSTRAINT `product_variants_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-ALTER TABLE customers 
-MODIFY COLUMN password VARCHAR(255) NULL;
+--
+-- Table structure for table `products`
+--
 
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(150) NOT NULL,
+  `description` text,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `perfume_type` varchar(20) DEFAULT NULL,
+  `perfume_for` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_products_created_at` (`created_at` DESC),
+  FULLTEXT KEY `idx_products_search` (`name`,`description`),
+  CONSTRAINT `products_chk_1` CHECK ((`perfume_type` in (_utf8mb4'floral',_utf8mb4'fresh',_utf8mb4'amber',_utf8mb4'woody',_utf8mb4'gourmand',_utf8mb4'citrusy'))),
+  CONSTRAINT `products_chk_2` CHECK ((`perfume_for` in (_utf8mb4'Male',_utf8mb4'Female')))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-ALTER TABLE customers 
-ADD COLUMN google_id VARCHAR(255) NULL;
+--
+-- Table structure for table `ratings`
+--
 
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ratings` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `product_id` int DEFAULT NULL,
+  `customer_id` int DEFAULT NULL,
+  `rating` tinyint DEFAULT NULL,
+  `comment` text,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_ratings_unique` (`product_id`,`customer_id`),
+  KEY `idx_ratings_product_id` (`product_id`),
+  KEY `idx_ratings_customer_id` (`customer_id`),
+  CONSTRAINT `ratings_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`),
+  CONSTRAINT `ratings_ibfk_2` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`),
+  CONSTRAINT `ratings_chk_1` CHECK ((`rating` between 1 and 5))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
-ALTER TABLE customers 
-ADD COLUMN profile_pic VARCHAR(255) NULL;
+--
+-- Table structure for table `sessions`
+--
 
-ALTER TABLE customers
-DROP COLUMN address;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sessions` (
+  `session_id` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `expires` int unsigned NOT NULL,
+  `data` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin,
+  PRIMARY KEY (`session_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
--- selection --
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
-select * from customers;
-select * from orders;
-select * from order_items;
-select * from product_images;
-select* from ratings;
-select * from products;
-select * from offers;
-select * from product_offers;
-select * from sessions;
-select *from product_variants;
-select * from bottles;
-
--- Admin Info Table --
-
-CREATE TABLE admin_info (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  admin_email VARCHAR(100) UNIQUE NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Seed first admin (run seed_admin.js to insert with hashed password)
+-- Dump completed on 2026-11-18  9:15:41

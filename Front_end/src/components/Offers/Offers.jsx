@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { Get_offers_with_products } from '../Server/offer';
 import rollbar from '../../rollbar';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 /* ---------------------------------------------------------- */
 /*  Ornamental divider — same compass-star motif used sitewide */
@@ -52,9 +52,9 @@ function OrnamentalDivider({ color = '#C9A864', className = '' }) {
 /* ---------------------------------------------------------- */
 /*  Helpers                                                    */
 /* ---------------------------------------------------------- */
+// server-এর is_active-ই একমাত্র সত্য (তারিখ server হিসাব করে)
 function isExpired(offer) {
-  if (!offer.valid_until) return false;
-  return new Date(offer.valid_until) < new Date();
+  return Number(offer.is_active) !== 1;
 }
 
 function getProductImage(p) {
@@ -500,7 +500,8 @@ export default function Offers() {
       try {
         const res = await Get_offers_with_products();
         const data = Array.isArray(res) ? res : res?.data ?? [];
-        setOffers(data);
+        // শুধু চালু offer দেখাব, expired offer public page-এ থাকবে না
+        setOffers(data.filter((o) => Number(o.is_active) === 1));
       } catch (err) {
         rollbar.error(err);
         console.log('error loading offers:', err);

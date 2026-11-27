@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Layers, Pencil, Trash2, PackageX } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 export default function ProductCard({ product: p, dark, onVariants, onEdit, onDelete, index }) {
   const [imgError, setImgError] = useState(false);
@@ -53,10 +53,10 @@ export default function ProductCard({ product: p, dark, onVariants, onEdit, onDe
         >
           {primaryImage && !imgError ? (
             <motion.img
-              src={`${API_BASE}${primaryImage}`}
+              src={`${API_BASE}${primaryImage}`} initial={{ scale: 0.9 }} animate={{ scale: 0.9 }} style={{ boxShadow: '0 0 0 400px #0a0126' }}
               alt={p.name}
               className="w-full h-full object-cover"
-              whileHover={{ scale: 1.08 }}
+              whileHover={{ scale: 0.95 }}
               transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
               onError={() => setImgError(true)}
             />

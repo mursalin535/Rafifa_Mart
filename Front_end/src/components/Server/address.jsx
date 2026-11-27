@@ -1,14 +1,14 @@
 import rollbar from "../../rollbar";
 
-const BASE = "http://localhost:5007";
+const BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
-export async function Add_address(data) {
+async function request(path, method, body) {
   try {
-    const res = await fetch(`${BASE}/add_address`, {
-      method: "POST",
+    const res = await fetch(`${BASE}${path}`, {
+      method,
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(data),
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     return await res.json();
   } catch (err) {
@@ -17,99 +17,12 @@ export async function Add_address(data) {
   }
 }
 
-export async function Get_address(id) {
-  try {
-    const res = await fetch(`${BASE}/address/${id}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Get_addresses(customerId) {
-  try {
-    const res = await fetch(`${BASE}/addresses/${customerId}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Get_default_address(customerId) {
-  try {
-    const res = await fetch(`${BASE}/address/default/${customerId}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Update_address(id, data) {
-  try {
-    const res = await fetch(`${BASE}/update_address/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(data),
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Set_default_address(customerId, addressId) {
-  try {
-    const res = await fetch(`${BASE}/set_default_address/${customerId}/${addressId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Delete_address(id) {
-  try {
-    const res = await fetch(`${BASE}/delete_address/${id}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Delete_all_addresses(customerId) {
-  try {
-    const res = await fetch(`${BASE}/delete_addresses/${customerId}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
+// customer_id server এখন session থেকে নেয়, তাই পাঠানোর দরকার নেই
+export const Add_address = (data) => request("/add_address", "POST", data);
+export const Get_address = (id) => request(`/address/${id}`, "GET");
+export const Get_addresses = (customerId) => request(`/addresses/${customerId}`, "GET");
+export const Get_default_address = (customerId) => request(`/address/default/${customerId}`, "GET");
+export const Update_address = (id, data) => request(`/update_address/${id}`, "PUT", data);
+export const Set_default_address = (customerId, addressId) =>
+  request(`/set_default_address/${customerId}/${addressId}`, "PUT");
+export const Delete_address = (id) => request(`/delete_address/${id}`, "DELETE");

@@ -1,49 +1,49 @@
 const Order_item_model = require('../model/Order_item_model');
-const Product_model = require('../model/Product_model');
+const Order_model = require('../model/Order_model');
 const rollbar = require('../rollbar');
 
+function parseId(value) {
+    const n = Number(value);
+    return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function logError(err) {
+    console.error("error occured in order item controller:", err);
+    rollbar.error("error occured in order item controller:", err);
+}
+
 const Order_item_controller = {
-    AddItem: async (req, res) => {
-        const { order_id, variant_id, quantity, unit_price } = req.body;
-        const itemModel = new Order_item_model();
-        const productModel = new Product_model();
-
-        try {
-            if (!order_id || !variant_id || !quantity || quantity <= 0) {
-                return res.status(400).json({ success: false, message: "order_id, variant_id, and valid quantity are required" });
-            }
-
-            const variant = await productModel.Get_variant_by_id(variant_id);
-            if (!variant) {
-                return res.status(404).json({ success: false, message: "Variant not found" });
-            }
-
-            const data = await itemModel.Add_item({ order_id, variant_id, quantity, unit_price });
-            res.status(200).json({ data, success: true, message: "Item added to order" });
-        } catch (err) {
-            console.error("error occured in order item controller:", err);
-            rollbar.error("error occured in order item controller:", err);
-            res.status(500).json({ success: false, message: "Failed to add item" });
-        }
-    },
-
     GetItemsByOrder: async (req, res) => {
-        const { order_id } = req.params;
+        const orderId = parseId(req.params.order_id);
+        if (!orderId) {
+            return res.status(400).json({ success: false, message: "Invalid order id" });
+        }
+
         const itemModel = new Order_item_model();
+        const orderModel = new Order_model();
 
         try {
-            const data = await itemModel.Get_items_by_order(Number(order_id));
+            const order = await orderModel.Get_order_by_id(orderId);
+            // admin সব দেখতে পারে; customer শুধু নিজের order-এর item
+            if (!order || (!req.isAdmin && Number(order.customer_id) !== Number(req.customerId))) {
+                return res.status(404).json({ success: false, message: "Order not found" });
+            }
+
+            const data = await itemModel.Get_items_by_order(orderId);
             res.status(200).json({ data, success: true });
         } catch (err) {
-            console.error("error occured in order item controller:", err);
-            rollbar.error("error occured in order item controller:", err);
+            logError(err);
             res.status(500).json({ success: false, message: "Failed to fetch items" });
         }
     },
 
     UpdateItem: async (req, res) => {
-        const { id } = req.params;
-        const { quantity, unit_price } = req.body;
+        const id = parseId(req.params.id);
+        if (!id) {
+            return res.status(400).json({ success: false, message: "Invalid item id" });
+        }
+
+        const { quantity, unit_price } = req.body || {};
         const itemModel = new Order_item_model();
 
         try {
@@ -64,14 +64,17 @@ const Order_item_controller = {
             const updated = await itemModel.Get_item_by_id(id);
             res.status(200).json({ data: updated, success: true, message: "Item updated" });
         } catch (err) {
-            console.error("error occured in order item controller:", err);
-            rollbar.error("error occured in order item controller:", err);
+            logError(err);
             res.status(500).json({ success: false, message: "Failed to update item" });
         }
     },
 
     DeleteItem: async (req, res) => {
-        const { id } = req.params;
+        const id = parseId(req.params.id);
+        if (!id) {
+            return res.status(400).json({ success: false, message: "Invalid item id" });
+        }
+
         const itemModel = new Order_item_model();
 
         try {
@@ -83,8 +86,7 @@ const Order_item_controller = {
             await itemModel.Delete_item(id);
             res.status(200).json({ success: true, message: "Item deleted" });
         } catch (err) {
-            console.error("error occured in order item controller:", err);
-            rollbar.error("error occured in order item controller:", err);
+            logError(err);
             res.status(500).json({ success: false, message: "Failed to delete item" });
         }
     }
