@@ -1,10 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Get_offers, Get_offers_with_products } from '../Server/offer';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import rollbar from '../../rollbar';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 function OrnamentalDivider({ color = '#C9A864', className = '' }) {
   return (
@@ -219,7 +219,9 @@ function OfferSlideshow({ offers, navigate }) {
   const [productIdx, setProductIdx] = useState(0);
   const [paused, setPaused] = useState(false);
 
-  const bannerOffers = offers.filter(o => o.thumbnail);
+  // thumbnail থাকুক বা না থাকুক সব চালু offer banner-এ দেখাবে
+  // (thumbnail না থাকলে নিচে নামসহ সাদামাটা বক্স দেখায়)
+  const bannerOffers = offers;
   const allProducts = [];
   offers.forEach(o => {
     (o.products || []).forEach(p => {
@@ -243,7 +245,9 @@ function OfferSlideshow({ offers, navigate }) {
     return () => clearInterval(t);
   }, [paused, allProducts.length]);
 
-  if (bannerOffers.length === 0 && allProducts.length === 0) return null;
+  // offer বা product যেকোনো একটা না থাকলে slideshow দেখাই না
+  // (আগে এখানে && ছিল, তাই একটা খালি থাকলেও নিচে undefined পড়ে crash করত)
+  if (bannerOffers.length === 0 || allProducts.length === 0) return null;
 
   const currentBanner = bannerOffers[bannerIdx] || bannerOffers[0];
   const currentProd = allProducts[productIdx] || allProducts[0];
@@ -417,8 +421,8 @@ export default function Offer_overview() {
       try {
         const data = await Get_offers();
         const raw = Array.isArray(data) ? data : data?.data ?? [];
-        const now = new Date();
-        const active = raw.filter(o => !o.valid_until || new Date(o.valid_until) >= now);
+        // server-এর is_active দিয়ে চালু offer বাছাই (তারিখ server হিসাব করে)
+        const active = raw.filter(o => Number(o.is_active) === 1);
         setOffers(active);
       }
       catch (err) {
@@ -433,8 +437,7 @@ export default function Offer_overview() {
       try {
         const data = await Get_offers_with_products();
         const raw = Array.isArray(data) ? data : data?.data ?? [];
-        const now = new Date();
-        const active = raw.filter(o => !o.valid_until || new Date(o.valid_until) >= now);
+        const active = raw.filter(o => Number(o.is_active) === 1);
         setOffersWithProducts(active);
       }
       catch (err) {

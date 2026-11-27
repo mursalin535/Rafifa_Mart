@@ -1,6 +1,6 @@
 import rollbar from "../../rollbar";
 
-const BASE = "http://localhost:5007";
+const BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 export async function Get_customers() {
   try {
@@ -16,6 +16,7 @@ export async function Get_customers() {
   }
 }
 
+// শুধু admin এর জন্য
 export async function Get_customer(id) {
   try {
     const res = await fetch(`${BASE}/customer/${id}`, {
@@ -30,86 +31,30 @@ export async function Get_customer(id) {
   }
 }
 
-export async function Get_customer_by_email(email) {
+// customer id এখন session থেকে আসে; প্রথম argument শুধু পুরনো call এর সাথে মিল রাখতে
+export async function Update_customer_phone(_customerId, phone) {
   try {
-    const res = await fetch(`${BASE}/customer/email/${email}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Get_customer_by_google_id(googleId) {
-  try {
-    const res = await fetch(`${BASE}/customer/google/${googleId}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Create_customer(data) {
-  try {
-    const res = await fetch(`${BASE}/customer/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(data),
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Create_customer_with_google(data) {
-  try {
-    const res = await fetch(`${BASE}/customer/create/google`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(data),
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Link_google_id(customerId, data) {
-  try {
-    const res = await fetch(`${BASE}/customer/${customerId}/link-google`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(data),
-    });
-    return await res.json();
-  } catch (err) {
-    rollbar.error(err);
-    console.log("error occured in server:", err);
-  }
-}
-
-export async function Update_customer_phone(customerId, phone) {
-  try {
-    const res = await fetch(`${BASE}/customer/${customerId}/phone`, {
+    const res = await fetch(`${BASE}/customer/phone`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ phone }),
+    });
+    return await res.json();
+  } catch (err) {
+    rollbar.error(err);
+    console.log("error occured in server:", err);
+  }
+}
+
+// শুধু admin এর জন্য: status = 'active' | 'blocked'
+export async function Update_customer_status(id, status) {
+  try {
+    const res = await fetch(`${BASE}/customer/${id}/status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ status }),
     });
     return await res.json();
   } catch (err) {

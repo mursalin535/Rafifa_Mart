@@ -7,7 +7,7 @@ import { X } from 'lucide-react';
 const GOLD = '#C9A864';
 const CREAM = '#F0EAD8';
 const PINE = '#13201A';
-const MAROON = '#5C1A1A';
+const MAROON = '#021047';
 const INK = '#0A0F0C';
 
 /* ═══════════ ORNAMENTAL DIVIDER (from Collection.jsx) ═══════════ */

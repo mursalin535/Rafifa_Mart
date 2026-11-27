@@ -32,10 +32,9 @@ export default function Admin() {
       {/* Desktop: Sidebar + Content */}
       <div className="hidden lg:flex w-full">
         {/* Sidebar */}
-        <div className="sticky top-0 h-screen w-[22%] shrink-0" style={{ backgroundColor: '#0A0A0A' }}>
-          <AdminNav selectNavElement={selectNavElement} horizontal={false} />
-        </div>
-
+        <div className="sticky top-0 h-screen w-[22%] shrink-0 pt-[12vh]" style={{ backgroundColor: '#0A0A0A' }}>
+  <AdminNav selectNavElement={selectNavElement} horizontal={false} />
+</div>
         {/* Content */}
         <div className="w-[78%] min-h-screen">
           <motion.div className="w-full h-[10vh] lg:h-[12vh]" />

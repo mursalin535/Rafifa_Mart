@@ -1,6 +1,6 @@
 import rollbar from "../../rollbar";
 
-const BASE = "http://localhost:5007";
+const BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 export async function Assign_offer(productId, offerId) {
   try {

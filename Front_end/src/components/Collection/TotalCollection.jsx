@@ -1,11 +1,14 @@
+import { imageSrc } from '../../utils/imageUrl';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Star } from 'lucide-react';
+import { getProductPriceInfo } from '../../utils/pricing';
+import OfferSticker from './OfferSticker';
 
 function getImage(productImages, productId) {
     const images = productImages.filter(img => img.product_id === productId);
     const primary = images.find(img => img.is_primary) || images[0];
-    return primary?.image_url || '';
+    return imageSrc(primary?.image_url);
 }
 
 function getAverageRating(ratings, productId) {
@@ -14,27 +17,9 @@ function getAverageRating(ratings, productId) {
     return list.reduce((sum, n) => sum + n, 0) / list.length;
 }
 
+// দাম আর offer-এর হিসাব সব এক জায়গায় (utils/pricing.js), server-এর নিয়মের সাথে হুবহু এক
 function getPriceInfo(productVariants, offers, productOffers, productId) {
-    const variants = productVariants.filter(v => v.product_id === productId);
-    const base = variants.sort((a, b) => a.price - b.price)[0];
-
-    const linkedOffer = productOffers.find(po => po.product_id === productId);
-    const offer = linkedOffer ? offers.find(o => o.id === linkedOffer.offer_id) : null;
-
-    if (!base) return { price: null, original: null, volumeMl: null, label: null };
-
-    if (offer) {
-        const discounted = offer.discount_type === 'percentage'
-            ? Math.round(base.price * (1 - offer.discount_value / 100))
-            : Math.max(0, Math.round(base.price - offer.discount_value));
-
-        const label = offer.discount_type === 'percentage'
-            ? `−${offer.discount_value}%`
-            : `−৳${offer.discount_value}`;
-
-        return { price: discounted, original: base.price, volumeMl: base.volume_ml, label };
-    }
-    return { price: base.price, original: null, volumeMl: base.volume_ml, label: null };
+    return getProductPriceInfo(productVariants, offers, productOffers, productId);
 }
 
 function ProductCard({ product, productImages, ratings, productVariants, offers, productOffers, index, onViewDetails }) {
@@ -56,7 +41,7 @@ function ProductCard({ product, productImages, ratings, productVariants, offers,
                     <img
                         src={image}
                         alt={product.name}
-                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+                        className="w-full h-full object-cover scale-[0.9] transition-transform duration-700 ease-out group-hover:scale-[0.95]" style={{ boxShadow: '0 0 0 400px #0a0126' }}
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
@@ -71,10 +56,13 @@ function ProductCard({ product, productImages, ratings, productVariants, offers,
                     <div className="absolute top-0 left-[-150%] w-1/2 h-full bg-gradient-to-r from-transparent via-[#F0EAD8]/15 to-transparent -skew-x-12 transition-all duration-700 ease-out group-hover:left-[150%]" />
                 </div>
 
+                {/* চালু offer থাকলে সোনালি গোল sticker (Top Collection-এর মতো) */}
                 {label && (
-                    <span className="absolute top-2 left-2 sm:top-3 sm:left-3 z-10 bg-[#011863] text-[#F0EAD8] text-[8px] sm:text-[10px] tracking-widest uppercase px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-sm">
-                        {label}
-                    </span>
+                    <OfferSticker
+                        label={label}
+                        size="md"
+                        className="absolute top-2 left-2 sm:top-3 sm:left-3 z-10"
+                    />
                 )}
 
                 <span className="absolute top-2 right-2 sm:top-3 sm:right-3 z-10 text-[8px] sm:text-[10px] uppercase tracking-widest text-[#F0EAD8]/70 bg-[#0a0f0c]/60 backdrop-blur-sm px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-sm border border-[#F0EAD8]/10">

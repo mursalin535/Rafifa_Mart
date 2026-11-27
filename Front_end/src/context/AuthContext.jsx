@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 const AuthContext = createContext();
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -45,19 +45,6 @@ export function AuthProvider({ children }) {
     return data.user;
   }
 
-  async function signup(name, email, password, phone) {
-    const res = await fetch(`${API_BASE}/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ name, email, password, phone }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Signup failed');
-    setUser(data.user);
-    return data.user;
-  }
-
   async function logout() {
     try {
       await fetch(`${API_BASE}/logout`, {
@@ -72,7 +59,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, loginWithGoogle, refreshUser: fetchCurrentUser }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, loginWithGoogle, refreshUser: fetchCurrentUser }}>
       {children}
     </AuthContext.Provider>
   );

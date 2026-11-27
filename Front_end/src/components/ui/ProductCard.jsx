@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 export default function ProductCard({ product, onView }) {
   const [imgError, setImgError] = useState(false);

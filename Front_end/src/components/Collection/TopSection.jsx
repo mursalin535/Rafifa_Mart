@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+
 import TopCollection from './TopCollection';
 
 const heading = "Our Top Collection";

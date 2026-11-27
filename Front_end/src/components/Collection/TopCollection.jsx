@@ -1,6 +1,9 @@
+import { imageSrc } from '../../utils/imageUrl';
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { getProductPriceInfo } from '../../utils/pricing';
+import OfferSticker from './OfferSticker';
 
 const ROTATE_MS = 5000;
 
@@ -34,7 +37,7 @@ function getTopProductIds(ratings, products) {
 function getImage(productImages, productId) {
     const images = productImages.filter(img => img.product_id === productId);
     const primary = images.find(img => img.is_primary) || images[0];
-    return primary?.image_url || '';
+    return imageSrc(primary?.image_url);
 }
 
 function getAverageRating(ratings, productId) {
@@ -43,27 +46,9 @@ function getAverageRating(ratings, productId) {
     return list.reduce((sum, n) => sum + n, 0) / list.length;
 }
 
+// দাম আর offer-এর হিসাব সব এক জায়গায় (utils/pricing.js), server-এর নিয়মের সাথে হুবহু এক
 function getPriceInfo(productVariants, offers, productOffers, productId) {
-    const variants = productVariants.filter(v => v.product_id === productId);
-    const base = variants.sort((a, b) => a.price - b.price)[0];
-
-    const linkedOffer = productOffers.find(po => po.product_id === productId);
-    const offer = linkedOffer ? offers.find(o => o.id === linkedOffer.offer_id) : null;
-
-    if (!base) return { price: null, original: null, volumeMl: null, label: null };
-
-    if (offer) {
-        const discounted = offer.discount_type === 'percentage'
-            ? Math.round(base.price * (1 - offer.discount_value / 100))
-            : Math.max(0, Math.round(base.price - offer.discount_value));
-
-        const label = offer.discount_type === 'percentage'
-            ? `−${offer.discount_value}%`
-            : `−৳${offer.discount_value}`;
-
-        return { price: discounted, original: base.price, volumeMl: base.volume_ml, label };
-    }
-    return { price: base.price, original: null, volumeMl: base.volume_ml, label: null };
+    return getProductPriceInfo(productVariants, offers, productOffers, productId);
 }
 
 export default function TopCollection({ products, productImages, ratings, productVariants, offers, productOffers, bottles }) {
@@ -131,15 +116,17 @@ export default function TopCollection({ products, productImages, ratings, produc
                         <div className="w-full h-full flex items-center justify-center bg-[#0a0f0c] overflow-hidden relative">
                             <div className="absolute inset-0 bg-gradient-to-t from-[#0a0f0c]/50 to-transparent pointer-events-none z-10" />
                             {image ? (
-                                <img src={image} alt={product.name} className="w-full h-full object-cover" />
+                                <img src={image} alt={product.name} className="w-full h-full object-cover scale-[0.9]" style={{ boxShadow: '0 0 0 400px #0a0126' }} />
                             ) : (
                                 <span className="font-body text-[#F0EAD8]/30 text-xs">No image</span>
                             )}
 
                             {label && (
-                                <span className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 bg-[#011863] text-[#F0EAD8] text-[9px] sm:text-[10px] tracking-widest uppercase px-2 sm:px-3 py-1 rounded-sm">
-                                    {label}
-                                </span>
+                                <OfferSticker
+                                    label={label}
+                                    size="lg"
+                                    className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20"
+                                />
                             )}
                         </div>
 

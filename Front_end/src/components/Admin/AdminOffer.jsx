@@ -9,7 +9,7 @@ import {
 import { Get_products } from '../Server/product';
 import { Plus, Search, Trash2, Edit3, X, Tag, Eye, Check, ChevronRight, Upload, Image as ImageIcon } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 
 const overlayVariants = {
   hidden: { opacity: 0 },

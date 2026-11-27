@@ -14,7 +14,7 @@ import { Upload_image } from '../../Server/product_image';
 
 const PERFUME_TYPES = ['floral', 'fresh', 'amber', 'woody', 'gourmand', 'citrusy'];
 const PERFUME_FOR = ['Male', 'Female'];
-const ATAR_VOLUMES = [3, 6, 12];
+const ATAR_VOLUMES = [3, 6, 8, 12];
 const SPRAY_VOLUMES = [12, 15, 30, 50, 100];
 
 const makeEmptyAtar = () => ATAR_VOLUMES.map((v) => ({ volume_ml: v, price: '', stock: '0' }));

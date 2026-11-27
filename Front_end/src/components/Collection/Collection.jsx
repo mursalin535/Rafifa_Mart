@@ -2,11 +2,11 @@ import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
 
 import { Get_bottles } from '../Server/bottle';
-import { Get_offers } from '../Server/offer';
+
 import { Get_products } from '../Server/product';
-import { Get_product_offers } from '../Server/product_offer';
-import { Get_all_ratings } from '../Server/rating';
-import { Get_product_images } from '../Server/product_image';
+import { Get_offers, Get_all_product_offers } from '../Server/offer';
+import { Get_public_ratings } from '../Server/rating';
+import { Get_all_product_images } from '../Server/product_image';
 import { Get_all_variants } from '../Server/product';
 
 import TopSection from './TopSection';
@@ -116,9 +116,9 @@ export default function Collection() {
           Get_bottles(),
           Get_products(),
           Get_offers(),
-          Get_product_offers(),
-          Get_product_images(),
-          Get_all_ratings(),
+          Get_all_product_offers(),
+          Get_all_product_images(),
+          Get_public_ratings(),
           Get_all_variants(),
         ]);
 

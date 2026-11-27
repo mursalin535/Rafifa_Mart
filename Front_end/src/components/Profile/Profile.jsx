@@ -32,6 +32,11 @@ function VerticalOrnament({ flip = false }) {
   );
 }
 
+const volLabel = (item) =>
+  item.volume_ml
+    ? `${item.packaging_type === 'atar' ? 'Atar ' : item.packaging_type === 'spray' ? 'Spray ' : ''}${item.volume_ml}ml`
+    : '';
+
 const STATUS_STYLES = {
   pending:   { color: '#C9A864', bg: 'rgba(201,168,100,0.1)', label: 'Pending' },
   confirmed: { color: '#5FB3B0', bg: 'rgba(95,179,176,0.1)',  label: 'Confirmed' },
@@ -52,7 +57,76 @@ function StatusBadge({ status }) {
   );
 }
 
-const EMPTY_ADDR = { label: 'Home', recipient_name: '', phone: '', address_line1: '', address_line2: '', city: '', district: '', division: '', postal_code: '' };
+// ঠিকানার ফর্ম: কোন ঘর compulsory আর ভুল হলে কী লেখা দেখাবে (CheckOut-এর সাথে একই নিয়ম)
+// Area ঘরটা database-এর district column-এ যায়
+const PHONE_RE = /^01[3-9][0-9]{8}$/;
+const POSTAL_RE = /^[0-9]{4}$/;
+
+const REQUIRED_FIELDS = {
+  label: 'House name',
+  recipient_name: 'Receiver name',
+  phone: 'Phone number',
+  address_line1: 'Address',
+  district: 'Area',
+  city: 'City',
+  division: 'Division',
+  postal_code: 'Postal code',
+};
+
+function validateAddress(addr) {
+  const errors = {};
+
+  for (const [key, label] of Object.entries(REQUIRED_FIELDS)) {
+    if (!String(addr[key] || '').trim()) {
+      errors[key] = `${label} is required.`;
+    }
+  }
+
+  if (!errors.phone) {
+    const cleanPhone = String(addr.phone).replace(/[\s-]/g, '');
+    if (!PHONE_RE.test(cleanPhone)) {
+      errors.phone = 'Phone number must be 11 digits and start with 01 (e.g. 017XXXXXXXX).';
+    }
+  }
+
+  if (!errors.postal_code && !POSTAL_RE.test(String(addr.postal_code).trim())) {
+    errors.postal_code = 'Postal code must be 4 digits.';
+  }
+
+  return errors;
+}
+
+// একটা input + তার নিচে নিজের error message
+function AddressInput({ name, placeholder, value, error, onChange, className = '' }) {
+  return (
+    <div className={`flex flex-col gap-1 ${className}`}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(name, e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-[#0a0f0c]/50 border px-2.5 py-2 text-xs text-[#F0EAD8] font-body rounded placeholder:text-[#F0EAD8]/15 focus:outline-none"
+        style={{ borderColor: error ? '#e08a8a' : 'rgba(240,234,216,0.1)' }}
+        onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = 'rgba(201,168,100,0.3)'; }}
+        onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = 'rgba(240,234,216,0.1)'; }}
+      />
+      {error && (
+        <span className="font-body text-[10px]" style={{ color: '#e08a8a' }}>{error}</span>
+      )}
+    </div>
+  );
+}
+
+const EMPTY_ADDR = {
+  label: '',
+  recipient_name: '',
+  phone: '',
+  address_line1: '',
+  district: '',
+  city: '',
+  division: '',
+  postal_code: '',
+};
 
 export default function Profile() {
   const { user, loading: authLoading, refreshUser } = useAuth();
@@ -68,6 +142,8 @@ export default function Profile() {
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [newAddress, setNewAddress] = useState(EMPTY_ADDR);
   const [savingAddress, setSavingAddress] = useState(false);
+  const [addressError, setAddressError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneValue, setPhoneValue] = useState('');
@@ -111,25 +187,53 @@ export default function Profile() {
 
   function handleAddressField(key, val) {
     setNewAddress(prev => ({ ...prev, [key]: val }));
+    // ঘরে লেখা শুরু করলেই ওই ঘরের error মুছে যায়
+    setFieldErrors(prev => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }
 
   async function handleSaveAddress() {
-    if (!newAddress.recipient_name || !newAddress.phone || !newAddress.address_line1 || !newAddress.city) return;
+    setAddressError('');
+
+    // সব compulsory ঘর আর phone/postal code ফর্মেই চেক (server-ও আবার যাচাই করে)
+    const errors = validateAddress(newAddress);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setAddressError('Please fix the highlighted fields.');
+      return;
+    }
+
     setSavingAddress(true);
     try {
-      const res = await Add_address({ ...newAddress, customer_id: user.id });
-      const saved = res?.data ?? res;
-      setAddresses(prev => [...prev, saved]);
-      setNewAddress(EMPTY_ADDR);
-      setShowAddressForm(false);
-    } catch (err) { console.error('Failed to save address:', err); }
+      const res = await Add_address(newAddress);
+      if (res?.success && res.data) {
+        setAddresses(prev => [...prev, res.data]);
+        setNewAddress(EMPTY_ADDR);
+        setFieldErrors({});
+        setShowAddressForm(false);
+      } else {
+        setAddressError(res?.message || 'Could not save the address.');
+      }
+    } catch (err) {
+      console.error('Failed to save address:', err);
+      setAddressError('Could not save the address. Please try again.');
+    }
     finally { setSavingAddress(false); }
   }
 
   async function handleDeleteAddress(addrId) {
+    setAddressError('');
     try {
-      await Delete_address(addrId);
-      setAddresses(prev => prev.filter(a => a.id !== addrId));
+      const res = await Delete_address(addrId);
+      if (res?.success) {
+        setAddresses(prev => prev.filter(a => a.id !== addrId));
+      } else {
+        setAddressError(res?.message || 'Could not delete the address.');
+      }
     } catch (err) { console.error('Failed to delete address:', err); }
   }
 
@@ -282,7 +386,7 @@ export default function Profile() {
                     <span className="text-[11px] uppercase tracking-[0.2em] text-[#C9A864] font-body">Addresses</span>
                   </div>
                   {!showAddressForm && (
-                    <button onClick={() => setShowAddressForm(true)} className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#C9A864]/60 hover:text-[#C9A864] transition-colors">
+                    <button onClick={() => { setAddressError(''); setFieldErrors({}); setShowAddressForm(true); }} className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#C9A864]/60 hover:text-[#C9A864] transition-colors">
                       <Plus size={12} /> Add
                     </button>
                   )}
@@ -292,6 +396,10 @@ export default function Profile() {
                   <span className="font-body text-[#F0EAD8]/30 text-xs">Loading addresses...</span>
                 ) : (
                   <div className="flex flex-col gap-2">
+                    {addressError && !showAddressForm && (
+                      <span className="font-body text-red-400/80 text-[11px] block">{addressError}</span>
+                    )}
+
                     {/* Address list */}
                     {addresses.map((addr) => (
                       <div key={addr.id} className="group flex items-start justify-between gap-2 px-3 py-2.5 border border-[#C9A864]/8 bg-[#0d1410]/40 rounded-lg">
@@ -303,7 +411,11 @@ export default function Profile() {
                             )}
                           </div>
                           <span className="font-body text-[#F0EAD8]/35 text-[11px] leading-relaxed block mt-0.5">
-                            {addr.recipient_name && `${addr.recipient_name}, `}{addr.address_line1}{addr.city ? `, ${addr.city}` : ''}{addr.district ? `, ${addr.district}` : ''}
+                            {addr.recipient_name && `${addr.recipient_name}, `}{addr.address_line1}
+                            {addr.district ? `, ${addr.district}` : ''}
+                            {addr.city ? `, ${addr.city}` : ''}
+                            {addr.division ? `, ${addr.division}` : ''}
+                            {addr.postal_code ? ` — ${addr.postal_code}` : ''}
                           </span>
                         </div>
                         <button onClick={() => handleDeleteAddress(addr.id)} className="p-1 rounded hover:bg-[#011863]/20 transition-colors opacity-0 group-hover:opacity-100 shrink-0 mt-0.5">
@@ -322,31 +434,30 @@ export default function Profile() {
                           className="overflow-hidden"
                         >
                           <div className="flex flex-col gap-2 p-3 border border-[#C9A864]/15 bg-[#0d1410]/60 rounded-lg">
-                            <div className="flex gap-1.5">
-                              {['Home', 'Work', 'Other'].map((lbl) => (
-                                <button key={lbl} onClick={() => handleAddressField('label', lbl)}
-                                  className={`flex-1 py-1.5 rounded text-[9px] uppercase tracking-wider font-body border transition-all ${newAddress.label === lbl ? 'border-[#C9A864]/50 bg-[#C9A864]/10 text-[#C9A864]' : 'border-[#F0EAD8]/10 text-[#F0EAD8]/30'}`}>
-                                  {lbl}
-                                </button>
-                              ))}
+                            <AddressInput name="label" placeholder="House Name *" value={newAddress.label} error={fieldErrors.label} onChange={handleAddressField} />
+                            <AddressInput name="recipient_name" placeholder="Receiver Name *" value={newAddress.recipient_name} error={fieldErrors.recipient_name} onChange={handleAddressField} />
+                            <AddressInput name="phone" placeholder="Phone Number * (e.g. 017XXXXXXXX)" value={newAddress.phone} error={fieldErrors.phone} onChange={handleAddressField} />
+                            <AddressInput name="address_line1" placeholder="Address *" value={newAddress.address_line1} error={fieldErrors.address_line1} onChange={handleAddressField} />
+
+                            <div className="flex gap-2 items-start">
+                              <AddressInput className="flex-1" name="district" placeholder="Area *" value={newAddress.district} error={fieldErrors.district} onChange={handleAddressField} />
+                              <AddressInput className="flex-1" name="city" placeholder="City *" value={newAddress.city} error={fieldErrors.city} onChange={handleAddressField} />
                             </div>
-                            {[
-                              { key: 'recipient_name', placeholder: 'Name' },
-                              { key: 'phone', placeholder: 'Phone' },
-                              { key: 'address_line1', placeholder: 'Address' },
-                              { key: 'city', placeholder: 'City' },
-                              { key: 'district', placeholder: 'District' },
-                            ].map(({ key, placeholder }) => (
-                              <input key={key} type="text" value={newAddress[key]} onChange={(e) => handleAddressField(key, e.target.value)}
-                                placeholder={placeholder}
-                                className="w-full bg-[#0a0f0c]/50 border border-[#F0EAD8]/10 px-2.5 py-2 text-xs text-[#F0EAD8] font-body rounded placeholder:text-[#F0EAD8]/15 focus:outline-none focus:border-[#C9A864]/30" />
-                            ))}
+                            <div className="flex gap-2 items-start">
+                              <AddressInput className="flex-1" name="division" placeholder="Division *" value={newAddress.division} error={fieldErrors.division} onChange={handleAddressField} />
+                              <AddressInput className="flex-1" name="postal_code" placeholder="Postal Code * (4 digits)" value={newAddress.postal_code} error={fieldErrors.postal_code} onChange={handleAddressField} />
+                            </div>
+
+                            {addressError && (
+                              <span className="font-body text-[11px]" style={{ color: '#e08a8a' }}>{addressError}</span>
+                            )}
+
                             <div className="flex gap-1.5 mt-1">
-                              <button onClick={() => { setShowAddressForm(false); setNewAddress(EMPTY_ADDR); }}
+                              <button onClick={() => { setShowAddressForm(false); setNewAddress(EMPTY_ADDR); setAddressError(''); setFieldErrors({}); }}
                                 className="flex-1 py-2 rounded border border-[#F0EAD8]/10 text-[#F0EAD8]/40 text-[10px] uppercase tracking-wider font-body hover:border-[#F0EAD8]/20 transition-colors">
                                 Cancel
                               </button>
-                              <button onClick={handleSaveAddress} disabled={savingAddress || !newAddress.recipient_name || !newAddress.phone || !newAddress.address_line1 || !newAddress.city}
+                              <button onClick={handleSaveAddress} disabled={savingAddress}
                                 className="flex-1 py-2 rounded text-[10px] uppercase tracking-wider font-body text-[#0a0f0c] disabled:opacity-30 transition-colors"
                                 style={{ background: 'linear-gradient(90deg, #C9A864, #F0EAD8, #C9A864)' }}>
                                 {savingAddress ? 'Saving...' : 'Save'}
@@ -467,7 +578,7 @@ export default function Profile() {
                                 {details.items?.map((item) => (
                                   <div key={item.id} className="flex items-center justify-between gap-4">
                                     <span className="font-body text-[#F0EAD8]/60 text-xs">
-                                      {item.item_name}{item.volume_ml ? ` — ${item.volume_ml}ml` : ''} × {item.quantity}
+                                      {item.item_name}{volLabel(item) ? ` — ${volLabel(item)}` : ''} × {item.quantity}
                                     </span>
                                     <span className="font-body text-[#F0EAD8]/80 text-xs">৳{item.unit_price * item.quantity}</span>
                                   </div>

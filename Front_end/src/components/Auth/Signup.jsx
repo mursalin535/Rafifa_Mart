@@ -3,9 +3,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
-const API_BASE = 'http://localhost:5007';
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5007";
 const OTP_LENGTH = 6;
 const OTP_EXPIRY_SECONDS = 60;
+
+// বাংলাদেশের মোবাইল: ঠিক ১১ ডিজিট, 01 দিয়ে শুরু, তৃতীয় ডিজিট ৩ থেকে ৯ (server-এর নিয়মের সাথে একই)
+const PHONE_RE = /^01[3-9][0-9]{8}$/;
+const PHONE_ERROR_TEXT = 'Phone number must be 11 digits and start with 01 (e.g. 017XXXXXXXX).';
 
 function VerticalOrnament({ flip = false }) {
   return (
@@ -79,7 +83,7 @@ function FormField({ label, hint, children }) {
   );
 }
 
-function OtpInput({ value, onChange, onSubmit, loading }) {
+function OtpInput({ value, onChange, onSubmit, loading, disabled }) {
   const inputRefs = [];
 
   function handleChange(index, e) {
@@ -117,7 +121,7 @@ function OtpInput({ value, onChange, onSubmit, loading }) {
   }
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!disabled) onSubmit(); }}>
       <div className="flex justify-center gap-3 mb-6">
         {Array.from({ length: OTP_LENGTH }).map((_, i) => (
           <input
@@ -127,10 +131,12 @@ function OtpInput({ value, onChange, onSubmit, loading }) {
             inputMode="numeric"
             maxLength={i === 0 ? OTP_LENGTH : 1}
             value={value[i] || ''}
+            disabled={disabled}
+            autoFocus={i === 0 && !disabled}
             onChange={(e) => handleChange(i, e)}
             onKeyDown={(e) => handleKeyDown(i, e)}
             onPaste={i === 0 ? handlePaste : undefined}
-            className="w-12 h-14 text-center font-heading text-xl outline-none transition-all duration-200 rounded-lg"
+            className="w-12 h-14 text-center font-heading text-xl outline-none transition-all duration-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               backgroundColor: '#0a0f0c',
               border: `1.5px solid ${value[i] ? 'rgba(201,168,100,0.5)' : 'rgba(240,234,216,0.1)'}`,
@@ -149,7 +155,7 @@ function OtpInput({ value, onChange, onSubmit, loading }) {
       ) : (
         <motion.button
           type="submit"
-          disabled={value.length < OTP_LENGTH}
+          disabled={disabled || value.length < OTP_LENGTH}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.98 }}
           className="w-full text-[#0a0f0c] font-heading text-sm uppercase tracking-widest py-4 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
@@ -173,11 +179,14 @@ export default function Signup() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneError, setPhoneError] = useState('');
 
   // Step 2 OTP
   const [step, setStep] = useState(1); // 1 = form, 2 = otp
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
+  const [otpLocked, setOtpLocked] = useState(false); // too many attempts / expired / no code on server
+  const [otpKey, setOtpKey] = useState(0); // OtpInput remount করে cursor ১ নম্বর ঘরে ফেরাতে
 
   // Timer
   const [timeLeft, setTimeLeft] = useState(OTP_EXPIRY_SECONDS);
@@ -185,6 +194,7 @@ export default function Signup() {
 
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
 
   // Countdown timer
   useEffect(() => {
@@ -208,9 +218,15 @@ export default function Signup() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   }, []);
 
+  function handlePhoneChange(value) {
+    setPhone(value);
+    if (phoneError) setPhoneError('');
+  }
+
   // Step 1: Send OTP
   async function handleSendOtp() {
     setError('');
+    setPhoneError('');
     if (!name.trim() || !email.trim() || !password.trim()) {
       setError('Please fill in name, email, and password.');
       return;
@@ -222,6 +238,13 @@ export default function Signup() {
     const passwordValid = passwordChecks.every((c) => c.test(password));
     if (!passwordValid) {
       setError('Password must include an uppercase letter, lowercase letter, digit, and special character.');
+      return;
+    }
+
+    // phone optional, কিন্তু কিছু লিখলে অবশ্যই ঠিক ১১ ডিজিট (space/dash বাদ দিয়ে দেখা হয়)
+    const cleanPhone = phone.replace(/[\s-]/g, '');
+    if (cleanPhone !== '' && !PHONE_RE.test(cleanPhone)) {
+      setPhoneError(PHONE_ERROR_TEXT);
       return;
     }
 
@@ -245,6 +268,8 @@ export default function Signup() {
       setTimeLeft(OTP_EXPIRY_SECONDS);
       setResendAvailable(false);
       setOtp('');
+      setOtpLocked(false);
+      setOtpKey((k) => k + 1);
     } catch (err) {
       setError(err.message || 'Something went wrong');
     } finally {
@@ -254,6 +279,7 @@ export default function Signup() {
 
   // Step 2: Verify OTP
   async function handleVerifyOtp() {
+    if (otpLocked) return;
     setOtpLoading(true);
     setError('');
     try {
@@ -264,7 +290,25 @@ export default function Signup() {
         body: JSON.stringify({ email: email.trim(), otp }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Verification failed');
+
+      if (!res.ok) {
+        const message = data.error || 'Verification failed';
+
+        // 429 = too many wrong attempts; "expired" / "No verification code found" = server-এ আর code নেই
+        const codeIsGone =
+          res.status === 429 || /expired|no verification code/i.test(message);
+
+        if (codeIsGone) {
+          setOtpLocked(true);
+          setResendAvailable(true);
+          setError(message);
+        } else {
+          setError(message);
+          setOtpKey((k) => k + 1); // ঘর খালি + cursor ১ নম্বর ঘরে
+        }
+        setOtp('');
+        return;
+      }
 
       // Refresh auth context so user state is updated
       await refreshUser();
@@ -277,11 +321,10 @@ export default function Signup() {
     }
   }
 
-  // Resend OTP
+  // Resend OTP (নতুন code চাওয়া)
   async function handleResend() {
-    setResendAvailable(false);
-    setTimeLeft(OTP_EXPIRY_SECONDS);
-    setOtp('');
+    if (resending) return;
+    setResending(true);
     setError('');
     try {
       const res = await fetch(`${API_BASE}/send-otp`, {
@@ -297,8 +340,17 @@ export default function Signup() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to resend code');
+
+      // সফল হলে তবেই timer reset + ঘর unlock
+      setResendAvailable(false);
+      setTimeLeft(OTP_EXPIRY_SECONDS);
+      setOtp('');
+      setOtpLocked(false);
+      setOtpKey((k) => k + 1);
     } catch (err) {
       setError(err.message || 'Failed to resend');
+    } finally {
+      setResending(false);
     }
   }
 
@@ -386,12 +438,22 @@ export default function Signup() {
 
                   {/* Form */}
                   <div className="flex flex-col gap-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 items-start">
                       <FormField label="Full Name" hint="required">
                         <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className={inputClasses} />
                       </FormField>
-                      <FormField label="Phone" hint="optional">
-                        <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+92 3XX XXXXXXX" className={inputClasses} />
+                      <FormField label="Phone" hint="optional · 11 digits">
+                        <input
+                          type="tel"
+                          value={phone}
+                          onChange={(e) => handlePhoneChange(e.target.value)}
+                          placeholder="01XXXXXXXXX"
+                          className={inputClasses}
+                          style={phoneError ? { borderColor: '#e08a8a' } : undefined}
+                        />
+                        {phoneError && (
+                          <span className="font-body text-[11px]" style={{ color: '#e08a8a' }}>{phoneError}</span>
+                        )}
                       </FormField>
                     </div>
 
@@ -478,21 +540,33 @@ export default function Signup() {
                   </div>
 
                   {/* OTP Input */}
-                  <OtpInput value={otp} onChange={setOtp} onSubmit={handleVerifyOtp} loading={otpLoading} />
+                  <OtpInput
+                    key={otpKey}
+                    value={otp}
+                    onChange={setOtp}
+                    onSubmit={handleVerifyOtp}
+                    loading={otpLoading}
+                    disabled={otpLocked}
+                  />
 
                   {/* Timer / Resend */}
                   <div className="text-center mt-5">
-                    {!resendAvailable ? (
+                    {otpLocked || resendAvailable ? (
+                      <button
+                        onClick={handleResend}
+                        disabled={resending}
+                        className="font-body text-xs underline disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ color: '#C9A864' }}
+                      >
+                        {resending ? 'Sending...' : otpLocked ? 'Request a new code' : 'Resend Code'}
+                      </button>
+                    ) : (
                       <p className="font-body text-xs" style={{ color: 'rgba(240,234,216,0.35)' }}>
                         Code expires in{' '}
                         <span style={{ color: timeLeft <= 15 ? '#e08a8a' : '#C9A864' }}>
                           {formatTime(timeLeft)}
                         </span>
                       </p>
-                    ) : (
-                      <button onClick={handleResend} className="font-body text-xs underline" style={{ color: '#C9A864' }}>
-                        Resend Code
-                      </button>
                     )}
                   </div>
 
@@ -503,7 +577,14 @@ export default function Signup() {
                   )}
 
                   <button
-                    onClick={() => { setStep(1); setOtp(''); setError(''); setResendAvailable(false); setTimeLeft(OTP_EXPIRY_SECONDS); }}
+                    onClick={() => {
+                      setStep(1);
+                      setOtp('');
+                      setError('');
+                      setOtpLocked(false);
+                      setResendAvailable(false);
+                      setTimeLeft(OTP_EXPIRY_SECONDS);
+                    }}
                     className="w-full text-center font-body text-xs mt-6"
                     style={{ color: 'rgba(240,234,216,0.4)' }}
                   >
