@@ -88,16 +88,16 @@ class Address_model {
         return result;
     }
 
-    async Delete_address(id) {
-        const [result] = await db.execute(`DELETE FROM addresses WHERE id = ?`, [id]);
-        return result;
+    async Is_address_used(id) {
+        const [rows] = await db.execute(
+            `SELECT 1 FROM orders WHERE address_id = ? LIMIT 1`,
+            [id]
+        );
+        return rows.length > 0;
     }
 
-    async Delete_all_addresses(customer_id) {
-        const [result] = await db.execute(
-            `DELETE FROM addresses WHERE customer_id = ?`,
-            [customer_id]
-        );
+    async Delete_address(id) {
+        const [result] = await db.execute(`DELETE FROM addresses WHERE id = ?`, [id]);
         return result;
     }
 }

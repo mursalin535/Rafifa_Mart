@@ -24,7 +24,7 @@ class Rating_model {
 
     async Get_ratings_by_product(product_id) {
         const [rows] = await db.execute(
-            `SELECT r.*, c.name AS customer_name 
+            `SELECT r.*, c.name AS customer_name, c.profile_pic AS customer_pic
              FROM ratings r 
              JOIN customers c ON r.customer_id = c.id 
              WHERE r.product_id = ? 
@@ -48,9 +48,18 @@ class Rating_model {
         return rows[0];
     }
 
+    // সর্বজনীন: শুধু product আর স্টার সংখ্যা, কোনো customer-এর তথ্য বা comment ছাড়া
+    // (Collection-এর card-এ গড় স্টার দেখানোর জন্য)
+    async Get_public_ratings() {
+        const [rows] = await db.execute(
+            `SELECT id, product_id, rating FROM ratings`
+        );
+        return rows;
+    }
+
     async Get_all_ratings() {
         const [rows] = await db.execute(
-            `SELECT r.*, c.name AS customer_name, p.name AS product_name 
+            `SELECT r.*, c.name AS customer_name, c.profile_pic AS customer_pic, p.name AS product_name 
              FROM ratings r 
              JOIN customers c ON r.customer_id = c.id 
              JOIN products p ON r.product_id = p.id 

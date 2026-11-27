@@ -2,13 +2,40 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
 // var rollbar = require('./rollbar');
 
 require('dotenv').config();
 
+const isProd = process.env.NODE_ENV === 'production';
+
+// দরকারি env না থাকলে সার্ভার চালুই হবে না (ভুল কনফিগে অর্ধেক ভাঙা অবস্থায় চলার চেয়ে ভালো)
+(function assertEnv() {
+    const missing = [];
+    if (!process.env.SESSION_SECRET) missing.push('SESSION_SECRET');
+    if (isProd) {
+        for (const key of ['FRONTEND_URL', 'CORS_ORIGINS', 'GOOGLE_CALLBACK_URL', 'DATABASE_PASSWORD']) {
+            if (!process.env[key]) missing.push(key);
+        }
+    }
+    if (missing.length > 0) {
+        console.error(`Missing required environment variables: ${missing.join(', ')}`);
+        process.exit(1);
+    }
+})();
+
 const app = express();
+
+// proxy-র পিছনে (প্রায় সব হোস্টিং) থাকলে এটা লাগেই: নইলে secure cookie সেট হয় না আর
+// rate limit সবাইকে একই IP ভাবে। মান = proxy কয়টা (সাধারণত 1)।
+if (process.env.TRUST_PROXY) {
+    const v = process.env.TRUST_PROXY;
+    app.set('trust proxy', /^\d+$/.test(v) ? Number(v) : v);
+} else if (isProd) {
+    console.warn('TRUST_PROXY is not set. If the server runs behind a proxy/load balancer, set TRUST_PROXY=1 (otherwise login cookies and rate limits will not work).');
+}
 
 const sessionMiddleware = require('./DataBase/Session');
 const passport = require('./DataBase/Passport');   // ← নতুন
@@ -39,11 +66,17 @@ const corsOptions = {
         }
     },
     methods: process.env.CORS_METHODS || 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    credentials: process.env.CORS_CREDENTIALS === 'true',
+    // login cookie-র জন্য এটা চালুই থাকতে হয়, তাই ডিফল্ট true (বন্ধ করতে চাইলে CORS_CREDENTIALS=false)
+    credentials: process.env.CORS_CREDENTIALS !== 'false',
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     exposedHeaders: ['X-Total-Count'],
     maxAge: 86400,
 };
+
+// আপলোডের ফোল্ডার না থাকলে নিজে তৈরি করে (নতুন সার্ভারে git থেকে খালি ফোল্ডার আসে না)
+for (const dir of ['products', 'offers']) {
+    fs.mkdirSync(path.join(__dirname, 'uploads', dir), { recursive: true });
+}
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

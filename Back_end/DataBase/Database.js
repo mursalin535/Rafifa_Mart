@@ -1,13 +1,8 @@
 const mysql=require('mysql2');
 const rollbar = require('../rollbar');
-require('dotenv').config();
+const dbConfig = require('./dbConfig');
 
-const pool=mysql.createPool({
-    host:process.env.DATABASE_HOST || 'localhost',
-    user:process.env.DATABASE_USER || 'root',
-    password:process.env.DATABASE_PASSWORD,
-    database:process.env.DATABASE_NAME || 'rafifa_mart'
-});
+const pool=mysql.createPool(dbConfig);
 
 pool.getConnection((err, connection)=>{
     if(err){

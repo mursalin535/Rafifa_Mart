@@ -1,5 +1,6 @@
 const db = require('../DataBase/Database');
 const Product_offer_model = require('./Product_offer_model');
+const { ACTIVE_OFFER_CONDITION } = require('../services/pricing');
 
 class Offer_model {
     async Add_offer({ offer_name, title, punchline, thumbnail, discount_type, discount_value, valid_from, valid_until }) {
@@ -12,12 +13,21 @@ class Offer_model {
     }
 
     async Get_all_offers() {
-        const [rows] = await db.execute(`SELECT * FROM offers ORDER BY created_at DESC`);
+        const [rows] = await db.execute(
+            `SELECT o.*, (${ACTIVE_OFFER_CONDITION}) AS is_active
+             FROM offers o
+             ORDER BY o.created_at DESC`
+        );
         return rows;
     }
 
     async Get_offer_by_id(id) {
-        const [rows] = await db.execute(`SELECT * FROM offers WHERE id = ?`, [id]);
+        const [rows] = await db.execute(
+            `SELECT o.*, (${ACTIVE_OFFER_CONDITION}) AS is_active
+             FROM offers o
+             WHERE o.id = ?`,
+            [id]
+        );
         return rows[0];
     }
 
@@ -42,7 +52,11 @@ class Offer_model {
     }
 
     async Get_offers_with_products() {
-        const [offers] = await db.execute(`SELECT * FROM offers ORDER BY created_at DESC`);
+        const [offers] = await db.execute(
+            `SELECT o.*, (${ACTIVE_OFFER_CONDITION}) AS is_active
+             FROM offers o
+             ORDER BY o.created_at DESC`
+        );
         const productOfferModel = new Product_offer_model();
         const results = [];
         for (const offer of offers) {

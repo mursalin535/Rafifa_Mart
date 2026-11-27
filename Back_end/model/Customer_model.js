@@ -109,6 +109,15 @@ async function updateCustomerPhone(id, phone) {
     throw err;
   }
 }
+async function updateCustomerStatus(id, status) {
+  try {
+    await connection.query('UPDATE customers SET account_status = ? WHERE id = ?', [status, id]);
+    return findCustomerById(id);
+  } catch (err) {
+    rollbar.error('Error in updateCustomerStatus:', err);
+    throw err;
+  }
+}
 
 module.exports = {
   findCustomerByEmail,
@@ -119,4 +128,5 @@ module.exports = {
   linkGoogleIdToCustomer,
   findAllCustomers,
   updateCustomerPhone,
+  updateCustomerStatus,
 };

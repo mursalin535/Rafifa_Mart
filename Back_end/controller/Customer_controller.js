@@ -1,14 +1,9 @@
-const bcrypt = require('bcrypt');
 const rollbar = require('../rollbar');
 const {
   findCustomerById,
-  findCustomerByEmail,
-  findCustomerByGoogleId,
-  createCustomerWithPassword,
-  createCustomerWithGoogle,
-  linkGoogleIdToCustomer,
   findAllCustomers,
   updateCustomerPhone,
+  updateCustomerStatus,
 } = require('../model/Customer_model');
 
 const Customer_controller = {
@@ -25,10 +20,13 @@ const Customer_controller = {
     },
 
     GetCustomerById: async (req, res) => {
-        const { id } = req.params;
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid customer id" });
+        }
 
         try {
-            const customer = await findCustomerById(Number(id));
+            const customer = await findCustomerById(id);
             if (!customer) {
                 return res.status(404).json({ success: false, message: "Customer not found" });
             }
@@ -42,133 +40,57 @@ const Customer_controller = {
         }
     },
 
-    GetCustomerByEmail: async (req, res) => {
-        const { email } = req.params;
+    UpdateMyPhone: async (req, res) => {
+        const raw = req.body && req.body.phone;
+        let phone = null;
 
-        try {
-            const customer = await findCustomerByEmail(email);
-            if (!customer) {
-                return res.status(404).json({ success: false, message: "Customer not found" });
+        if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+            phone = String(raw).replace(/[\s-]/g, '');
+            if (!/^01[3-9][0-9]{8}$/.test(phone)) {
+                return res.status(400).json({ success: false, message: "Phone number must be 11 digits and start with 01 (e.g. 017XXXXXXXX)." });
             }
-
-            const { password, ...safe } = customer;
-            res.status(200).json({ data: safe, success: true });
-        } catch (err) {
-            console.error("error occured in customer controller:", err);
-            rollbar.error("error occured in customer controller:", err);
-            res.status(500).json({ success: false, message: "Failed to fetch customer" });
-        }
-    },
-
-    GetCustomerByGoogleId: async (req, res) => {
-        const { google_id } = req.params;
-
-        try {
-            const customer = await findCustomerByGoogleId(google_id);
-            if (!customer) {
-                return res.status(404).json({ success: false, message: "Customer not found" });
-            }
-
-            const { password, ...safe } = customer;
-            res.status(200).json({ data: safe, success: true });
-        } catch (err) {
-            console.error("error occured in customer controller:", err);
-            rollbar.error("error occured in customer controller:", err);
-            res.status(500).json({ success: false, message: "Failed to fetch customer" });
-        }
-    },
-
-    CreateCustomerWithPassword: async (req, res) => {
-        const { name, email, password, phone } = req.body;
-
-        if (!name || !email || !password) {
-            return res.status(400).json({ success: false, message: "Name, email, and password are required" });
         }
 
         try {
-            const existing = await findCustomerByEmail(email);
-            if (existing) {
-                return res.status(409).json({ success: false, message: "An account with this email already exists" });
-            }
-
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const customer = await createCustomerWithPassword({ name, email, hashedPassword, phone });
-
-            const { password: _, ...safe } = customer;
-            res.status(201).json({ data: safe, success: true, message: "Customer created successfully" });
-        } catch (err) {
-            console.error("error occured in customer controller:", err);
-            rollbar.error("error occured in customer controller:", err);
-            res.status(500).json({ success: false, message: "Failed to create customer" });
-        }
-    },
-
-    CreateCustomerWithGoogle: async (req, res) => {
-        const { name, email, google_id, profile_pic } = req.body;
-
-        if (!name || !email || !google_id) {
-            return res.status(400).json({ success: false, message: "Name, email, and google_id are required" });
-        }
-
-        try {
-            const existing = await findCustomerByEmail(email);
-            if (existing) {
-                return res.status(409).json({ success: false, message: "An account with this email already exists" });
-            }
-
-            const customer = await createCustomerWithGoogle({ name, email, googleId: google_id, profilePic: profile_pic });
-
-            const { password, ...safe } = customer;
-            res.status(201).json({ data: safe, success: true, message: "Customer created successfully" });
-        } catch (err) {
-            console.error("error occured in customer controller:", err);
-            rollbar.error("error occured in customer controller:", err);
-            res.status(500).json({ success: false, message: "Failed to create customer" });
-        }
-    },
-
-    LinkGoogleId: async (req, res) => {
-        const { id } = req.params;
-        const { google_id, profile_pic } = req.body;
-
-        if (!google_id) {
-            return res.status(400).json({ success: false, message: "google_id is required" });
-        }
-
-        try {
-            const existing = await findCustomerById(Number(id));
-            if (!existing) {
-                return res.status(404).json({ success: false, message: "Customer not found" });
-            }
-
-            const customer = await linkGoogleIdToCustomer(Number(id), google_id, profile_pic);
-
-            const { password, ...safe } = customer;
-            res.status(200).json({ data: safe, success: true, message: "Google ID linked successfully" });
-        } catch (err) {
-            console.error("error occured in customer controller:", err);
-            rollbar.error("error occured in customer controller:", err);
-            res.status(500).json({ success: false, message: "Failed to link Google ID" });
-        }
-    },
-
-    UpdateCustomerPhone: async (req, res) => {
-        const { id } = req.params;
-        const { phone } = req.body;
-
-        try {
-            const existing = await findCustomerById(Number(id));
-            if (!existing) {
-                return res.status(404).json({ success: false, message: "Customer not found" });
-            }
-
-            const customer = await updateCustomerPhone(Number(id), phone || null);
+            const customer = await updateCustomerPhone(req.customerId, phone);
             const { password, ...safe } = customer;
             res.status(200).json({ data: safe, success: true, message: "Phone updated successfully" });
         } catch (err) {
             console.error("error occured in customer controller:", err);
             rollbar.error("error occured in customer controller:", err);
             res.status(500).json({ success: false, message: "Failed to update phone" });
+        }
+    },
+
+    // admin: customer block / unblock
+    UpdateCustomerStatus: async (req, res) => {
+        const id = Number(req.params.id);
+        const status = req.body && req.body.status;
+
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ success: false, message: "Invalid customer id" });
+        }
+        if (status !== 'active' && status !== 'blocked') {
+            return res.status(400).json({ success: false, message: "Status must be 'active' or 'blocked'" });
+        }
+
+        try {
+            const existing = await findCustomerById(id);
+            if (!existing) {
+                return res.status(404).json({ success: false, message: "Customer not found" });
+            }
+
+            const customer = await updateCustomerStatus(id, status);
+            const { password, ...safe } = customer;
+            res.status(200).json({
+                data: safe,
+                success: true,
+                message: status === 'blocked' ? "Customer blocked" : "Customer unblocked",
+            });
+        } catch (err) {
+            console.error("error occured in customer controller:", err);
+            rollbar.error("error occured in customer controller:", err);
+            res.status(500).json({ success: false, message: "Failed to update customer status" });
         }
     },
 }
